@@ -1,13 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --color-bg-0: #111215;
-  --color-bg-top: #101114;
-  --color-bg-surface: #1a1c1f;
-  --color-bg-elevated: #24272d;
-  --color-bg-hover: #2a2d34;
-  --color-line-soft: #343841;
-  --color-line-strong: #4b515c;
+  --color-bg-0: #000000;
+  --color-bg-top: #0a0a0b;
+  --color-bg-surface: #111111;
+  --color-bg-elevated: #1a1a1c;
+  --color-bg-hover: #1f1f22;
+  --color-line-soft: #27272a;
+  --color-line-strong: #3f3f46;
   --color-text-primary: #d7dadc;
   --color-text-soft: #a7acb3;
   --color-text-muted: #7f858f;

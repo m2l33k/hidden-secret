@@ -1,4 +1,4 @@
-export const CATEGORIES = [
+﻿export const CATEGORIES = [
   {
     slug: "ideas",
     label: "Ideas",
@@ -40,6 +40,8 @@ export type PrototypePost = {
   category: CategorySlug;
   content: string;
   createdAt: string;
+  language_code: "en" | "fr" | "ar";
+  country_code: string;
   baseReports: number;
   baseReactions: Record<ReactionType, number>;
 };
@@ -51,6 +53,8 @@ export const MOCK_POSTS: PrototypePost[] = [
     content:
       "What if schools taught emotional regulation with the same seriousness as math?",
     createdAt: "2026-03-22T08:12:00.000Z",
+    language_code: "en",
+    country_code: "US",
     baseReports: 0,
     baseReactions: {
       agree: 24,
@@ -62,8 +66,10 @@ export const MOCK_POSTS: PrototypePost[] = [
     id: "post-2",
     category: "ideas",
     content:
-      "Public libraries could host anonymous monthly 'life reset' circles where nobody gives advice, they only listen.",
+      "Public libraries could host anonymous monthly life reset circles where nobody gives advice, they only listen.",
     createdAt: "2026-03-22T06:45:00.000Z",
+    language_code: "en",
+    country_code: "CA",
     baseReports: 1,
     baseReactions: {
       agree: 15,
@@ -77,6 +83,8 @@ export const MOCK_POSTS: PrototypePost[] = [
     content:
       "I still do not understand why being exhausted all the time is considered normal adulthood.",
     createdAt: "2026-03-22T05:10:00.000Z",
+    language_code: "en",
+    country_code: "GB",
     baseReports: 0,
     baseReactions: {
       agree: 8,
@@ -87,9 +95,10 @@ export const MOCK_POSTS: PrototypePost[] = [
   {
     id: "post-4",
     category: "confusions",
-    content:
-      "Why do we celebrate productivity but rarely celebrate rest that prevents burnout?",
+    content: "Pourquoi celebrer la productivite mais rarement le repos ?",
     createdAt: "2026-03-21T20:34:00.000Z",
+    language_code: "fr",
+    country_code: "FR",
     baseReports: 0,
     baseReactions: {
       agree: 13,
@@ -103,6 +112,8 @@ export const MOCK_POSTS: PrototypePost[] = [
     content:
       "Most meetings are emotional comfort rituals and should have been a shared document instead.",
     createdAt: "2026-03-21T16:22:00.000Z",
+    language_code: "en",
+    country_code: "US",
     baseReports: 1,
     baseReactions: {
       agree: 29,
@@ -113,9 +124,10 @@ export const MOCK_POSTS: PrototypePost[] = [
   {
     id: "post-6",
     category: "unpopular-opinions",
-    content:
-      "Constant self-optimization content has become a polite form of self-dislike.",
+    content: "thaqafat tahsin al dhat al daem asbahat shaklan min jald al dhat.",
     createdAt: "2026-03-21T11:08:00.000Z",
+    language_code: "ar",
+    country_code: "TN",
     baseReports: 2,
     baseReactions: {
       agree: 17,
@@ -123,5 +135,19 @@ export const MOCK_POSTS: PrototypePost[] = [
       brilliant_idea: 10,
     },
   },
+  {
+    id: "post-7",
+    category: "ideas",
+    content:
+      "Et si les villes reservaient une heure sans notifications chaque soir ?",
+    createdAt: "2026-03-21T09:08:00.000Z",
+    language_code: "fr",
+    country_code: "BE",
+    baseReports: 2,
+    baseReactions: {
+      agree: 9,
+      feel_this_too: 13,
+      brilliant_idea: 5,
+    },
+  },
 ];
-
