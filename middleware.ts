@@ -5,6 +5,16 @@ import {
   SupportedLocale,
 } from "./src/lib/i18n";
 
+const SESSION_COOKIE_NAME = "qs_sid";
+const SAFE_DEFAULT_COUNTRY = "US";
+
+const securedCookieOptions = {
+  path: "/",
+  sameSite: "strict" as const,
+  secure: true,
+  httpOnly: true,
+};
+
 function extractLocaleFromPath(pathname: string): SupportedLocale | null {
   const maybeLocale = pathname.split("/")[1];
   if (isSupportedLocale(maybeLocale)) {
@@ -36,16 +46,39 @@ function pickLocale(request: NextRequest): SupportedLocale {
 }
 
 function normalizeCountryCode(rawCountryCode: string | null): string {
-  const normalized = (rawCountryCode || "US").toUpperCase().trim();
-  return /^[A-Z]{2}$/.test(normalized) ? normalized : "US";
+  if (!rawCountryCode) {
+    return SAFE_DEFAULT_COUNTRY;
+  }
+
+  const firstSegment = rawCountryCode.split(",")[0].trim();
+  const normalized = firstSegment.toUpperCase();
+  return /^[A-Z]{2}$/.test(normalized) ? normalized : SAFE_DEFAULT_COUNTRY;
+}
+
+function resolveCountryCode(request: NextRequest) {
+  const hasTrustedVercelHeaders = request.headers.has("x-vercel-id");
+  if (!hasTrustedVercelHeaders) {
+    return SAFE_DEFAULT_COUNTRY;
+  }
+
+  return normalizeCountryCode(request.headers.get("x-vercel-ip-country"));
+}
+
+function hasValidSessionCookie(request: NextRequest) {
+  const rawSession = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (!rawSession) {
+    return false;
+  }
+
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    rawSession,
+  );
 }
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  const countryCode = normalizeCountryCode(
-    request.headers.get("x-vercel-ip-country"),
-  );
+  const countryCode = resolveCountryCode(request);
   const localeFromPath = extractLocaleFromPath(pathname);
 
   if (!localeFromPath) {
@@ -53,11 +86,15 @@ export function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = `/${locale}${pathname === "/" ? "" : pathname}`;
     const response = NextResponse.redirect(redirectUrl);
-    response.cookies.set("locale", locale, { path: "/", sameSite: "lax" });
-    response.cookies.set("country_code", countryCode, {
-      path: "/",
-      sameSite: "lax",
-    });
+    response.cookies.set("locale", locale, securedCookieOptions);
+    response.cookies.set("country_code", countryCode, securedCookieOptions);
+    if (!hasValidSessionCookie(request)) {
+      response.cookies.set(
+        SESSION_COOKIE_NAME,
+        crypto.randomUUID(),
+        securedCookieOptions,
+      );
+    }
     return response;
   }
 
@@ -69,11 +106,15 @@ export function middleware(request: NextRequest) {
     request: { headers: requestHeaders },
   });
 
-  response.cookies.set("locale", localeFromPath, { path: "/", sameSite: "lax" });
-  response.cookies.set("country_code", countryCode, {
-    path: "/",
-    sameSite: "lax",
-  });
+  response.cookies.set("locale", localeFromPath, securedCookieOptions);
+  response.cookies.set("country_code", countryCode, securedCookieOptions);
+  if (!hasValidSessionCookie(request)) {
+    response.cookies.set(
+      SESSION_COOKIE_NAME,
+      crypto.randomUUID(),
+      securedCookieOptions,
+    );
+  }
 
   return response;
 }

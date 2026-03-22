@@ -66,12 +66,10 @@ type ResonanceNotification = {
   isNew: boolean;
 };
 
-const SESSION_KEY = "anonymous-space.session-id";
 const REACTIONS_KEY = "anonymous-space.reactions";
 const REPORTS_KEY = "anonymous-space.reports";
 const FEED_SCOPE_KEY = "anonymous-space.feed-scope";
 const QUIET_OATH_KEY = "hasAgreedToRules";
-const SENTINEL_DELAY_MS = 1500;
 
 const quietOathRules = [
   "Speak with empathy, not dominance.",
@@ -119,19 +117,6 @@ const echoIntentOptions: { key: EchoIntent; label: string }[] = [
   { key: "experience", label: "Experience" },
 ];
 
-const echoNamePool = [
-  "Nova",
-  "Atlas",
-  "Drift",
-  "Solace",
-  "Orbit",
-  "Harbor",
-  "Lumen",
-  "Mosaic",
-  "Aurora",
-  "Sierra",
-];
-
 const auraClasses = [
   "border-l-2 border-l-orange-500/45",
   "border-l-2 border-l-cyan-500/40",
@@ -141,15 +126,38 @@ const auraClasses = [
   "border-l-2 border-l-sky-500/38",
 ] as const;
 
-const auraGradientPalette = [
-  "bg-gradient-to-br from-slate-700 via-zinc-800 to-zinc-950",
-  "bg-gradient-to-br from-zinc-700 via-zinc-800 to-orange-950",
-  "bg-gradient-to-br from-teal-900 via-zinc-900 to-zinc-950",
-  "bg-gradient-to-br from-slate-800 via-teal-900 to-zinc-950",
-  "bg-gradient-to-br from-zinc-700 via-red-900 to-zinc-950",
-  "bg-gradient-to-br from-orange-900 via-zinc-900 to-zinc-950",
-  "bg-gradient-to-br from-rose-900 via-zinc-900 to-zinc-950",
-  "bg-gradient-to-br from-zinc-700 via-teal-950 to-slate-950",
+const auraDirections = [
+  "bg-gradient-to-br",
+  "bg-gradient-to-tr",
+  "bg-gradient-to-r",
+  "bg-gradient-to-bl",
+] as const;
+
+const auraFromPalette = [
+  "from-slate-700",
+  "from-zinc-700",
+  "from-teal-900",
+  "from-orange-900",
+  "from-red-900",
+  "from-zinc-800",
+] as const;
+
+const auraViaPalette = [
+  "via-zinc-800",
+  "via-zinc-900",
+  "via-slate-900",
+  "via-teal-950",
+  "via-orange-950",
+  "via-red-950",
+] as const;
+
+const auraToPalette = [
+  "to-zinc-950",
+  "to-slate-950",
+  "to-teal-950",
+  "to-orange-950",
+  "to-red-950",
+  "to-black",
 ] as const;
 
 const mockResonanceNotifications: ResonanceNotification[] = [
@@ -196,15 +204,14 @@ function hashSeed(input: string) {
   return Math.abs(hash);
 }
 
-function pickEchoAlias(seed: string) {
-  const aliasIndex = hashSeed(seed) % echoNamePool.length;
-  return `Echo ${echoNamePool[aliasIndex]}`;
-}
-
 function generateAura(seed: string) {
   const normalizedSeed = seed.trim().toLowerCase() || "anonymous";
-  const auraIndex = hashSeed(normalizedSeed) % auraGradientPalette.length;
-  return auraGradientPalette[auraIndex];
+  const direction = auraDirections[hashSeed(`${normalizedSeed}:d`) % auraDirections.length];
+  const from = auraFromPalette[hashSeed(`${normalizedSeed}:f`) % auraFromPalette.length];
+  const via = auraViaPalette[hashSeed(`${normalizedSeed}:v`) % auraViaPalette.length];
+  const to = auraToPalette[hashSeed(`${normalizedSeed}:t`) % auraToPalette.length];
+
+  return `${direction} ${from} ${via} ${to}`;
 }
 
 export default function AnonymousSpace({
@@ -304,13 +311,16 @@ export default function AnonymousSpace({
   const [echoIntentByPost, setEchoIntentByPost] = useState<
     Record<string, EchoIntent | undefined>
   >({});
-  const [echoAliasByParticipant, setEchoAliasByParticipant] = useState<
-    Record<string, string>
-  >({});
   const [reactionsByPost, setReactionsByPost] = useState<
     Record<string, ReactionType>
   >({});
   const [reportsByPost, setReportsByPost] = useState<Record<string, true>>({});
+  const [serverReportCountByPost, setServerReportCountByPost] = useState<
+    Record<string, number>
+  >({});
+  const [isReportingByPost, setIsReportingByPost] = useState<Record<string, true>>(
+    {},
+  );
   const [dismissedPosts, setDismissedPosts] = useState<Record<string, true>>({});
   const [collapsingPosts, setCollapsingPosts] = useState<Record<string, true>>(
     {},
@@ -321,31 +331,30 @@ export default function AnonymousSpace({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastCounterRef = useRef(0);
-  const postCounterRef = useRef(0);
-  const echoCounterRef = useRef(0);
-  const notificationCounterRef = useRef(
-    mockResonanceNotifications.reduce((max, notification) => {
-      return Math.max(max, notification.id);
-    }, 0),
-  );
-  const pendingTimeoutsRef = useRef<number[]>([]);
-  const postsRef = useRef(posts);
 
   useEffect(() => {
     setComposerCategory(initialCategory);
   }, [initialCategory]);
 
   useEffect(() => {
-    postsRef.current = posts;
-  }, [posts]);
+    let isActive = true;
 
-  useEffect(() => {
-    const existingSessionId = localStorage.getItem(SESSION_KEY);
-    const resolvedSessionId = existingSessionId ?? createSessionId();
+    fetch("/api/moderation/session", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok || !isActive) {
+          return;
+        }
 
-    if (!existingSessionId) {
-      localStorage.setItem(SESSION_KEY, resolvedSessionId);
-    }
+        const data = (await response.json()) as { publicSessionId?: string };
+        if (data.publicSessionId) {
+          setSessionId(data.publicSessionId);
+        }
+      })
+      .catch(() => {
+        if (isActive) {
+          setSessionId(createSessionId());
+        }
+      });
 
     const storedScope = localStorage.getItem(FEED_SCOPE_KEY);
     if (storedScope === "global" || storedScope === "local") {
@@ -356,7 +365,6 @@ export default function AnonymousSpace({
       setShowQuietOath(true);
     }
 
-    setSessionId(resolvedSessionId);
     setReactionsByPost(
       safeJsonParse<Record<string, ReactionType>>(
         localStorage.getItem(REACTIONS_KEY),
@@ -366,6 +374,10 @@ export default function AnonymousSpace({
     setReportsByPost(
       safeJsonParse<Record<string, true>>(localStorage.getItem(REPORTS_KEY), {}),
     );
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -379,15 +391,6 @@ export default function AnonymousSpace({
       document.body.style.overflow = previousOverflow;
     };
   }, [isPrivacyModalOpen, isResonanceOpen, showQuietOath]);
-
-  useEffect(() => {
-    return () => {
-      pendingTimeoutsRef.current.forEach((timeoutId) =>
-        window.clearTimeout(timeoutId),
-      );
-      pendingTimeoutsRef.current = [];
-    };
-  }, []);
 
   useEffect(() => {
     localStorage.setItem(REACTIONS_KEY, JSON.stringify(reactionsByPost));
@@ -425,17 +428,6 @@ export default function AnonymousSpace({
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 2400);
-  };
-
-  const queueTimeout = (callback: () => void, delay: number) => {
-    const timeoutId = window.setTimeout(() => {
-      pendingTimeoutsRef.current = pendingTimeoutsRef.current.filter(
-        (id) => id !== timeoutId,
-      );
-      callback();
-    }, delay);
-
-    pendingTimeoutsRef.current.push(timeoutId);
   };
 
   const openResonanceDrawer = () => {
@@ -490,6 +482,16 @@ export default function AnonymousSpace({
       delete next[postId];
       return next;
     });
+    setServerReportCountByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setIsReportingByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
     setDismissedPosts((previous) => {
       const next = { ...previous };
       delete next[postId];
@@ -518,8 +520,14 @@ export default function AnonymousSpace({
     pushToast("Signal vaporized.");
   };
 
-  const getReportCount = (post: PrototypePost) =>
-    post.baseReports + (reportsByPost[post.id] ? 1 : 0);
+  const getReportCount = (post: PrototypePost) => {
+    const serverCount = serverReportCountByPost[post.id];
+    if (typeof serverCount === "number") {
+      return serverCount;
+    }
+
+    return post.baseReports + (reportsByPost[post.id] ? 1 : 0);
+  };
 
   const getReactionCount = (post: PrototypePost, reaction: ReactionType) =>
     post.baseReactions[reaction] + (reactionsByPost[post.id] === reaction ? 1 : 0);
@@ -618,7 +626,26 @@ export default function AnonymousSpace({
     return (localeScoped.length > 0 ? localeScoped : categoryScoped).length;
   };
 
-  const handlePublish = (event: FormEvent) => {
+  const callModerationApi = async <T,>(
+    body: Record<string, unknown>,
+  ): Promise<T> => {
+    const response = await fetch("/api/moderation", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const payload = (await response.json()) as T & { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error || "Moderation request failed.");
+    }
+
+    return payload;
+  };
+
+  const handlePublish = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedDraft = draft.trim();
 
@@ -627,39 +654,47 @@ export default function AnonymousSpace({
     }
 
     setIsPublishing(true);
-    postCounterRef.current += 1;
-    const newPost: PrototypePost = {
-      id: `local-${sessionId || "anon"}-${postCounterRef.current}`,
-      category: composerCategory,
-      content: trimmedDraft,
-      createdAt: new Date().toISOString(),
-      language_code: activeLocale,
-      country_code: resolvedCountry,
-      baseReports: 0,
-      baseReactions: {
-        agree: 0,
-        feel_this_too: 0,
-        brilliant_idea: 0,
-      },
-    };
+    try {
+      const result = await callModerationApi<{
+        post: PrototypePost;
+        reportCount: number;
+        allowEchoes: boolean;
+        authorTag: string;
+      }>({
+        action: "publish",
+        payload: {
+          category: composerCategory,
+          content: trimmedDraft,
+          languageCode: activeLocale,
+          countryCode: resolvedCountry,
+          allowEchoes: allowEchoesOnPost,
+        },
+      });
 
-    queueTimeout(() => {
       setEchoesEnabledByPost((previous) => ({
         ...previous,
-        [newPost.id]: allowEchoesOnPost,
+        [result.post.id]: result.allowEchoes,
       }));
       setPostAuthorSessionByPost((previous) => ({
         ...previous,
-        [newPost.id]: sessionId || "anon",
+        [result.post.id]: result.authorTag,
       }));
-
-      setPosts((previous) => [newPost, ...previous]);
+      setServerReportCountByPost((previous) => ({
+        ...previous,
+        [result.post.id]: result.reportCount,
+      }));
+      setPosts((previous) => [result.post, ...previous]);
       setDraft("");
       setIsComposeFocused(false);
-      setIsPublishing(false);
       triggerHaptic(18);
       pushToast("Post published into the void.");
-    }, SENTINEL_DELAY_MS);
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Unable to publish right now.",
+      );
+    } finally {
+      setIsPublishing(false);
+    }
   };
 
   const reactToPost = (postId: string, reaction: ReactionType) => {
@@ -674,14 +709,48 @@ export default function AnonymousSpace({
     pushToast("Vote recorded.");
   };
 
-  const reportPost = (postId: string) => {
-    if (reportsByPost[postId]) {
+  const reportPost = async (postId: string) => {
+    if (reportsByPost[postId] || isReportingByPost[postId]) {
       return;
     }
 
-    setReportsByPost((previous) => ({ ...previous, [postId]: true }));
-    triggerHaptic(8);
-    pushToast("Report submitted.");
+    setIsReportingByPost((previous) => ({ ...previous, [postId]: true }));
+    try {
+      const result = await callModerationApi<{
+        alreadyReported: boolean;
+        reportCount: number;
+        hidden: boolean;
+      }>({
+        action: "report",
+        payload: { postId },
+      });
+
+      setReportsByPost((previous) => ({ ...previous, [postId]: true }));
+      setServerReportCountByPost((previous) => ({
+        ...previous,
+        [postId]: result.reportCount,
+      }));
+
+      if (result.hidden) {
+        dismissPost(postId);
+        pushToast("Report submitted. Signal is now hidden.");
+      } else if (result.alreadyReported) {
+        pushToast("You already reported this signal.");
+      } else {
+        pushToast("Report submitted.");
+      }
+      triggerHaptic(8);
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Unable to report this signal.",
+      );
+    } finally {
+      setIsReportingByPost((previous) => {
+        const next = { ...previous };
+        delete next[postId];
+        return next;
+      });
+    }
   };
 
   const dismissPost = (postId: string) => {
@@ -734,7 +803,7 @@ export default function AnonymousSpace({
     setEchoIntentByPost((previous) => ({ ...previous, [postId]: intent }));
   };
 
-  const submitEcho = (postId: string) => {
+  const submitEcho = async (postId: string) => {
     if (isScanningEchoByPost[postId]) {
       return;
     }
@@ -746,72 +815,36 @@ export default function AnonymousSpace({
       return;
     }
 
-    const postAuthorSession = postAuthorSessionByPost[postId];
-    const isAuthorReply = Boolean(sessionId) && sessionId === postAuthorSession;
-
-    let alias: string | undefined;
-    if (!isAuthorReply) {
-      const participantKey = `${postId}:${sessionId || "anon"}`;
-      alias = echoAliasByParticipant[participantKey];
-      if (!alias) {
-        alias = pickEchoAlias(participantKey);
-        setEchoAliasByParticipant((previous) => ({
-          ...previous,
-          [participantKey]: alias!,
-        }));
-      }
-    }
-
-    echoCounterRef.current += 1;
-    const echo: EchoEntry = {
-      id: `echo-local-${echoCounterRef.current}`,
-      text: draftText,
-      intent,
-      createdAt: new Date().toISOString(),
-      authorType: isAuthorReply ? "author" : "echo",
-      alias,
-    };
-
     setIsScanningEchoByPost((previous) => ({ ...previous, [postId]: true }));
-    queueTimeout(() => {
-      if (!postsRef.current.some((post) => post.id === postId)) {
-        setIsScanningEchoByPost((previous) => {
-          const next = { ...previous };
-          delete next[postId];
-          return next;
-        });
-        return;
-      }
+    try {
+      const result = await callModerationApi<{ echo: EchoEntry }>({
+        action: "echo",
+        payload: {
+          postId,
+          text: draftText,
+          intent,
+        },
+      });
 
       setEchoesByPost((previous) => ({
         ...previous,
-        [postId]: [...(previous[postId] || []), echo],
+        [postId]: [...(previous[postId] || []), result.echo],
       }));
       setExpandedEchoesByPost((previous) => ({ ...previous, [postId]: true }));
       setEchoDraftByPost((previous) => ({ ...previous, [postId]: "" }));
       setEchoIntentByPost((previous) => ({ ...previous, [postId]: undefined }));
+
+      triggerHaptic(10);
+      pushToast("Echo sent.");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : "Unable to send Echo.");
+    } finally {
       setIsScanningEchoByPost((previous) => {
         const next = { ...previous };
         delete next[postId];
         return next;
       });
-
-      if (!isAuthorReply && postAuthorSession === sessionId) {
-        notificationCounterRef.current += 1;
-        setResonanceNotifications((previous) => [
-          {
-            id: notificationCounterRef.current,
-            message: `${alias || "An Echo"} replied to your signal.`,
-            createdAt: new Date().toISOString(),
-            isNew: true,
-          },
-          ...previous,
-        ]);
-      }
-
-      triggerHaptic(10);
-      pushToast("Echo sent.");
-    }, SENTINEL_DELAY_MS);
+    }
   };
 
   const changeLocale = (nextLocale: SupportedLocale) => {
@@ -837,12 +870,30 @@ export default function AnonymousSpace({
     }, 280);
   };
 
-  const destroyIdentity = () => {
-    const freshSessionId = createSessionId();
-    localStorage.setItem(SESSION_KEY, freshSessionId);
-    setSessionId(freshSessionId);
-    triggerHaptic(16);
-    pushToast("Identity regenerated. Aura refreshed.");
+  const destroyIdentity = async () => {
+    try {
+      const response = await fetch("/api/moderation/session", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to rotate identity right now.");
+      }
+
+      const payload = (await response.json()) as { publicSessionId?: string };
+      if (payload.publicSessionId) {
+        setSessionId(payload.publicSessionId);
+      }
+
+      triggerHaptic(16);
+      pushToast("Identity regenerated. Aura refreshed.");
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to regenerate identity right now.",
+      );
+    }
   };
 
   return (
@@ -1191,6 +1242,7 @@ export default function AnonymousSpace({
                     const alreadyReacted = reactionsByPost[post.id];
                     const reportCount = getReportCount(post);
                     const hasReported = Boolean(reportsByPost[post.id]);
+                    const isReporting = Boolean(isReportingByPost[post.id]);
                     const CategoryIcon = categoryIcon[post.category];
                     const isExpanded = Boolean(expandedPosts[post.id]);
                     const isLongPost = post.content.length > 290;
@@ -1435,11 +1487,15 @@ export default function AnonymousSpace({
                               <button
                                 type="button"
                                 onClick={() => reportPost(post.id)}
-                                disabled={hasReported || reportCount >= 3}
+                                disabled={hasReported || reportCount >= 3 || isReporting}
                                 className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 text-[12px] text-[var(--color-text-muted)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-soft)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
                               >
                                 <Flag className="h-3.5 w-3.5" />
-                                {hasReported ? "Reported" : "Report"}
+                                {isReporting
+                                  ? "Reporting..."
+                                  : hasReported
+                                    ? "Reported"
+                                    : "Report"}
                               </button>
 
                               {post.language_code !== activeLocale && (
