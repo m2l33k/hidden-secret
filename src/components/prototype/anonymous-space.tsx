@@ -20,7 +20,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { FocusEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   CATEGORIES,
   CategorySlug,
@@ -49,6 +49,13 @@ const SESSION_KEY = "anonymous-space.session-id";
 const REACTIONS_KEY = "anonymous-space.reactions";
 const REPORTS_KEY = "anonymous-space.reports";
 const FEED_SCOPE_KEY = "anonymous-space.feed-scope";
+const QUIET_OATH_KEY = "hasAgreedToRules";
+
+const quietOathRules = [
+  "Speak with empathy, not dominance.",
+  "Protect anonymity. Never ask for identity clues.",
+  "Report harm. Do not amplify it.",
+] as const;
 
 const categoryIcon: Record<CategorySlug, typeof Lightbulb> = {
   ideas: Lightbulb,
@@ -136,7 +143,15 @@ export default function AnonymousSpace({
   const [composerCategory, setComposerCategory] =
     useState<CategorySlug>(initialCategory);
   const [sessionId, setSessionId] = useState("");
-  const [isComposing, setIsComposing] = useState(false);
+  const [isComposeFocused, setIsComposeFocused] = useState(false);
+  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+  const [showQuietOath, setShowQuietOath] = useState(false);
+  const [isQuietOathExiting, setIsQuietOathExiting] = useState(false);
+  const [oathChecks, setOathChecks] = useState<[boolean, boolean, boolean]>([
+    false,
+    false,
+    false,
+  ]);
   const [feedScope, setFeedScope] = useState<FeedScope>("global");
   const [sortMode, setSortMode] = useState<SortMode>("latest");
   const [reactionsByPost, setReactionsByPost] = useState<
@@ -172,6 +187,10 @@ export default function AnonymousSpace({
       setFeedScope(storedScope);
     }
 
+    if (!localStorage.getItem(QUIET_OATH_KEY)) {
+      setShowQuietOath(true);
+    }
+
     setSessionId(resolvedSessionId);
     setReactionsByPost(
       safeJsonParse<Record<string, ReactionType>>(
@@ -183,6 +202,18 @@ export default function AnonymousSpace({
       safeJsonParse<Record<string, true>>(localStorage.getItem(REPORTS_KEY), {}),
     );
   }, []);
+
+  useEffect(() => {
+    if (!showQuietOath && !isPrivacyModalOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isPrivacyModalOpen, showQuietOath]);
 
   useEffect(() => {
     localStorage.setItem(REACTIONS_KEY, JSON.stringify(reactionsByPost));
@@ -263,6 +294,16 @@ export default function AnonymousSpace({
     return auraClasses[auraIndex];
   };
 
+  const formatPostTimestamp = (createdAt: string) => {
+    const parsedDate = new Date(createdAt);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "just now";
+    }
+
+    const formatted = formatDistanceToNow(parsedDate, { addSuffix: true });
+    return formatted.startsWith("in ") ? "just now" : formatted;
+  };
+
   const categoryScoped = posts.filter(
     (post) => post.category === initialCategory && isVisibleBySafety(post),
   );
@@ -331,7 +372,7 @@ export default function AnonymousSpace({
 
     setPosts((previous) => [newPost, ...previous]);
     setDraft("");
-    setIsComposing(false);
+    setIsComposeFocused(false);
     triggerHaptic(18);
     pushToast("Post published into the void.");
   };
@@ -376,13 +417,6 @@ export default function AnonymousSpace({
     pushToast("Post hidden from your feed.");
   };
 
-  const handleComposerBlurCapture = (event: FocusEvent<HTMLFormElement>) => {
-    const nextTarget = event.relatedTarget as Node | null;
-    if (!nextTarget || !event.currentTarget.contains(nextTarget)) {
-      setIsComposing(false);
-    }
-  };
-
   const toggleReadMore = (postId: string) => {
     setExpandedPosts((previous) => {
       if (previous[postId]) {
@@ -397,6 +431,31 @@ export default function AnonymousSpace({
 
   const changeLocale = (nextLocale: SupportedLocale) => {
     router.push(`/${nextLocale}/${initialCategory}`);
+  };
+
+  const toggleOathRule = (index: number) => {
+    setOathChecks((previous) => {
+      const next = [...previous] as [boolean, boolean, boolean];
+      next[index] = !next[index];
+      return next;
+    });
+  };
+
+  const allOathRulesChecked = oathChecks.every(Boolean);
+
+  const enterQuietSignal = () => {
+    localStorage.setItem(QUIET_OATH_KEY, "true");
+    setIsQuietOathExiting(true);
+    window.setTimeout(() => {
+      setShowQuietOath(false);
+      setIsQuietOathExiting(false);
+    }, 280);
+  };
+
+  const destroyIdentity = () => {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.setItem(SESSION_KEY, createSessionId());
+    window.location.reload();
   };
 
   return (
@@ -470,6 +529,16 @@ export default function AnonymousSpace({
                 ))}
               </select>
             </label>
+
+            <button
+              type="button"
+              onClick={() => setIsPrivacyModalOpen(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] px-2.5 text-[12px] text-[var(--color-text-soft)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-primary)]"
+              aria-label="Privacy Settings"
+            >
+              <Lock className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Privacy</span>
+            </button>
           </div>
         </div>
 
@@ -484,6 +553,10 @@ export default function AnonymousSpace({
           </span>
         </div>
       </header>
+
+      {isComposeFocused && !showQuietOath && (
+        <div className="pointer-events-none fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
+      )}
 
       <div className="sticky top-12 z-40 border-b border-[var(--color-line-soft)] bg-[var(--color-bg-top)]/96 px-2 py-1.5 backdrop-blur-sm lg:hidden">
         <nav
@@ -592,10 +665,8 @@ export default function AnonymousSpace({
         <section className="space-y-2.5">
           <form
             onSubmit={handlePublish}
-            onFocusCapture={() => setIsComposing(true)}
-            onBlurCapture={handleComposerBlurCapture}
-            className={`relative z-40 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 transition-all md:p-3 ${
-              isComposing
+            className={`relative z-50 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 transition-all md:p-3 ${
+              isComposeFocused
                 ? "shadow-[0_0_0_1px_rgba(255,69,0,0.35),0_24px_64px_rgba(0,0,0,0.55)]"
                 : ""
             }`}
@@ -630,6 +701,8 @@ export default function AnonymousSpace({
               ref={textareaRef}
               id="post-text"
               value={draft}
+              onFocus={() => setIsComposeFocused(true)}
+              onBlur={() => setIsComposeFocused(false)}
               onChange={(event) => setDraft(event.target.value)}
               maxLength={1200}
               placeholder="Share something honest..."
@@ -658,13 +731,9 @@ export default function AnonymousSpace({
           </form>
 
           <div className="relative">
-            {isComposing && (
-              <div className="pointer-events-none absolute inset-0 z-20 rounded-xl bg-black/45 backdrop-blur-[2px]" />
-            )}
-
             <div
               className={`space-y-2 transition-all ${
-                isComposing ? "scale-[0.995] opacity-80" : ""
+                isComposeFocused ? "scale-[0.995] opacity-80" : ""
               }`}
             >
               {hiddenByReports > 0 && (
@@ -720,9 +789,7 @@ export default function AnonymousSpace({
                               </span>
                               <span>.</span>
                               <time dateTime={post.createdAt}>
-                                {formatDistanceToNow(new Date(post.createdAt), {
-                                  addSuffix: true,
-                                })}
+                                {formatPostTimestamp(post.createdAt)}
                               </time>
                               <span>.</span>
                               <span>{post.country_code}</span>
@@ -853,16 +920,96 @@ export default function AnonymousSpace({
                 <li>Region uses country header only, never raw IP storage.</li>
               </ul>
             </section>
-
-            <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-3 text-[12px] text-[var(--color-text-soft)]">
-              <p className="font-semibold text-[var(--color-text-primary)]">Session</p>
-              <p className="mt-1.5 break-all text-[11px] text-[var(--color-text-muted)]">
-                {sessionId || "loading..."}
-              </p>
-            </section>
           </div>
         </aside>
       </main>
+
+      {isPrivacyModalOpen && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/70 px-3 backdrop-blur-sm">
+          <button
+            type="button"
+            aria-label="Close privacy settings"
+            onClick={() => setIsPrivacyModalOpen(false)}
+            className="absolute inset-0"
+          />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-[var(--color-line-strong)] bg-[var(--color-bg-surface)] p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                Privacy Settings
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsPrivacyModalOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="mt-3 text-[12px] text-[var(--color-text-soft)]">Session UUID</p>
+            <p className="mt-1 break-all rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+              {sessionId || "loading..."}
+            </p>
+
+            <button
+              type="button"
+              onClick={destroyIdentity}
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-full border border-red-500/45 bg-red-500/10 px-4 text-[12px] font-medium text-red-200 transition hover:bg-red-500/20"
+            >
+              Destroy Identity
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showQuietOath && (
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-black px-4 transition-opacity duration-300 ${
+            isQuietOathExiting ? "opacity-0" : "opacity-100"
+          }`}
+        >
+          <div className="w-full max-w-xl rounded-2xl border border-[var(--color-line-soft)] bg-[#050505] p-5">
+            <p className="text-xs tracking-[0.14em] text-[var(--color-text-muted)] uppercase">
+              Quiet Oath
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold text-[var(--color-text-primary)]">
+              Enter only if you can protect the room.
+            </h1>
+
+            <div className="mt-5 space-y-3">
+              {quietOathRules.map((rule, index) => (
+                <button
+                  key={rule}
+                  type="button"
+                  onClick={() => toggleOathRule(index)}
+                  className="flex w-full items-start gap-3 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-3 text-left transition hover:border-[var(--color-line-strong)]"
+                >
+                  <span
+                    className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded border text-[10px] ${
+                      oathChecks[index]
+                        ? "border-[var(--color-brand)] bg-[var(--color-brand)] text-white"
+                        : "border-[var(--color-line-strong)] bg-transparent text-transparent"
+                    }`}
+                  >
+                    <Check className="h-3 w-3" />
+                  </span>
+                  <span className="text-sm text-[var(--color-text-soft)]">{rule}</span>
+                </button>
+              ))}
+            </div>
+
+            {allOathRulesChecked && (
+              <button
+                type="button"
+                onClick={enterQuietSignal}
+                className="mt-5 inline-flex h-11 items-center justify-center rounded-full bg-[var(--color-brand)] px-5 text-sm font-semibold text-white transition hover:brightness-110"
+              >
+                Enter QuietSignal
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[60] mx-auto flex w-full max-w-md flex-col items-center gap-2 px-3">
         {toasts.map((toast) => (
