@@ -13,6 +13,7 @@ import {
   Lightbulb,
   Lock,
   MessageCircleHeart,
+  MessageSquare,
   Search,
   SendHorizontal,
   Sparkles,
@@ -44,6 +45,16 @@ type Toast = {
 
 type FeedScope = "global" | "local";
 type SortMode = "latest" | "trending" | "relatable";
+type EchoIntent = "perspective" | "question" | "experience";
+
+type EchoEntry = {
+  id: string;
+  text: string;
+  intent: EchoIntent;
+  createdAt: string;
+  authorType: "author" | "echo";
+  alias?: string;
+};
 
 const SESSION_KEY = "anonymous-space.session-id";
 const REACTIONS_KEY = "anonymous-space.reactions";
@@ -91,6 +102,25 @@ const sortOptions: { key: SortMode; label: string }[] = [
   { key: "relatable", label: "Most Relatable" },
 ];
 
+const echoIntentOptions: { key: EchoIntent; label: string }[] = [
+  { key: "perspective", label: "Perspective" },
+  { key: "question", label: "Question" },
+  { key: "experience", label: "Experience" },
+];
+
+const echoNamePool = [
+  "Nova",
+  "Atlas",
+  "Drift",
+  "Solace",
+  "Orbit",
+  "Harbor",
+  "Lumen",
+  "Mosaic",
+  "Aurora",
+  "Sierra",
+];
+
 const auraClasses = [
   "border-l-2 border-l-orange-500/45",
   "border-l-2 border-l-cyan-500/40",
@@ -129,6 +159,11 @@ function hashSeed(input: string) {
   return Math.abs(hash);
 }
 
+function pickEchoAlias(seed: string) {
+  const aliasIndex = hashSeed(seed) % echoNamePool.length;
+  return `Echo ${echoNamePool[aliasIndex]}`;
+}
+
 export default function AnonymousSpace({
   initialCategory,
   activeLocale,
@@ -144,6 +179,7 @@ export default function AnonymousSpace({
     useState<CategorySlug>(initialCategory);
   const [sessionId, setSessionId] = useState("");
   const [isComposeFocused, setIsComposeFocused] = useState(false);
+  const [allowEchoesOnPost, setAllowEchoesOnPost] = useState(true);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [showQuietOath, setShowQuietOath] = useState(false);
   const [isQuietOathExiting, setIsQuietOathExiting] = useState(false);
@@ -154,6 +190,71 @@ export default function AnonymousSpace({
   ]);
   const [feedScope, setFeedScope] = useState<FeedScope>("global");
   const [sortMode, setSortMode] = useState<SortMode>("latest");
+  const [echoesEnabledByPost, setEchoesEnabledByPost] = useState<
+    Record<string, boolean>
+  >(() =>
+    Object.fromEntries(MOCK_POSTS.map((post, idx) => [post.id, idx % 4 !== 0])),
+  );
+  const [postAuthorSessionByPost, setPostAuthorSessionByPost] = useState<
+    Record<string, string>
+  >(() =>
+    Object.fromEntries(
+      MOCK_POSTS.map((post, idx) => [post.id, `seed-author-${idx + 1}`]),
+    ),
+  );
+  const [echoesByPost, setEchoesByPost] = useState<Record<string, EchoEntry[]>>(
+    () => ({
+      "post-1": [
+        {
+          id: "echo-seed-1",
+          text: "I have seen this work in small workshops. It changes the tone instantly.",
+          intent: "experience",
+          createdAt: "2026-03-22T07:35:00.000Z",
+          authorType: "echo",
+          alias: "Echo Atlas",
+        },
+      ],
+      "post-2": [
+        {
+          id: "echo-seed-2",
+          text: "Could this be hosted weekly in schools too?",
+          intent: "question",
+          createdAt: "2026-03-22T06:20:00.000Z",
+          authorType: "echo",
+          alias: "Echo Nova",
+        },
+        {
+          id: "echo-seed-3",
+          text: "Yes, but only if facilitators are trained to hold silence safely.",
+          intent: "perspective",
+          createdAt: "2026-03-22T06:10:00.000Z",
+          authorType: "author",
+        },
+      ],
+      "post-5": [
+        {
+          id: "echo-seed-4",
+          text: "Hard truth. Shared docs plus async votes would solve half of this.",
+          intent: "perspective",
+          createdAt: "2026-03-21T15:55:00.000Z",
+          authorType: "echo",
+          alias: "Echo Lumen",
+        },
+      ],
+    }),
+  );
+  const [expandedEchoesByPost, setExpandedEchoesByPost] = useState<
+    Record<string, true>
+  >({});
+  const [echoDraftByPost, setEchoDraftByPost] = useState<Record<string, string>>(
+    {},
+  );
+  const [echoIntentByPost, setEchoIntentByPost] = useState<
+    Record<string, EchoIntent | undefined>
+  >({});
+  const [echoAliasByParticipant, setEchoAliasByParticipant] = useState<
+    Record<string, string>
+  >({});
   const [reactionsByPost, setReactionsByPost] = useState<
     Record<string, ReactionType>
   >({});
@@ -169,6 +270,7 @@ export default function AnonymousSpace({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastCounterRef = useRef(0);
   const postCounterRef = useRef(0);
+  const echoCounterRef = useRef(0);
 
   useEffect(() => {
     setComposerCategory(initialCategory);
@@ -370,6 +472,15 @@ export default function AnonymousSpace({
       },
     };
 
+    setEchoesEnabledByPost((previous) => ({
+      ...previous,
+      [newPost.id]: allowEchoesOnPost,
+    }));
+    setPostAuthorSessionByPost((previous) => ({
+      ...previous,
+      [newPost.id]: sessionId || "anon",
+    }));
+
     setPosts((previous) => [newPost, ...previous]);
     setDraft("");
     setIsComposeFocused(false);
@@ -427,6 +538,71 @@ export default function AnonymousSpace({
 
       return { ...previous, [postId]: true };
     });
+  };
+
+  const toggleEchoThread = (postId: string) => {
+    setExpandedEchoesByPost((previous) => {
+      if (previous[postId]) {
+        const next = { ...previous };
+        delete next[postId];
+        return next;
+      }
+
+      return { ...previous, [postId]: true };
+    });
+  };
+
+  const updateEchoDraft = (postId: string, value: string) => {
+    setEchoDraftByPost((previous) => ({ ...previous, [postId]: value }));
+  };
+
+  const updateEchoIntent = (postId: string, intent: EchoIntent) => {
+    setEchoIntentByPost((previous) => ({ ...previous, [postId]: intent }));
+  };
+
+  const submitEcho = (postId: string) => {
+    const draftText = (echoDraftByPost[postId] || "").trim();
+    const intent = echoIntentByPost[postId];
+
+    if (!draftText || !intent) {
+      return;
+    }
+
+    const postAuthorSession = postAuthorSessionByPost[postId];
+    const isAuthorReply = Boolean(sessionId) && sessionId === postAuthorSession;
+
+    let alias: string | undefined;
+    if (!isAuthorReply) {
+      const participantKey = `${postId}:${sessionId || "anon"}`;
+      alias = echoAliasByParticipant[participantKey];
+      if (!alias) {
+        alias = pickEchoAlias(participantKey);
+        setEchoAliasByParticipant((previous) => ({
+          ...previous,
+          [participantKey]: alias!,
+        }));
+      }
+    }
+
+    echoCounterRef.current += 1;
+    const echo: EchoEntry = {
+      id: `echo-local-${echoCounterRef.current}`,
+      text: draftText,
+      intent,
+      createdAt: new Date().toISOString(),
+      authorType: isAuthorReply ? "author" : "echo",
+      alias,
+    };
+
+    setEchoesByPost((previous) => ({
+      ...previous,
+      [postId]: [...(previous[postId] || []), echo],
+    }));
+    setExpandedEchoesByPost((previous) => ({ ...previous, [postId]: true }));
+    setEchoDraftByPost((previous) => ({ ...previous, [postId]: "" }));
+    setEchoIntentByPost((previous) => ({ ...previous, [postId]: undefined }));
+    triggerHaptic(10);
+    pushToast("Echo sent.");
   };
 
   const changeLocale = (nextLocale: SupportedLocale) => {
@@ -605,7 +781,7 @@ export default function AnonymousSpace({
         </div>
       </div>
 
-      <main className="relative z-10 mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-3 px-2 py-3 md:gap-4 md:px-4 lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)_320px]">
+      <main className="relative mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-3 px-2 py-3 md:gap-4 md:px-4 lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)_320px]">
         <aside className="hidden lg:block">
           <div className="sticky top-[88px] space-y-3">
             <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5">
@@ -709,6 +885,29 @@ export default function AnonymousSpace({
               className="mt-2 min-h-24 max-h-[420px] w-full resize-none overflow-y-auto rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 py-2.5 text-[14px] leading-relaxed text-[var(--color-text-primary)] outline-none transition placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-line-strong)]"
             />
 
+            <div className="mt-2 flex items-center justify-between rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 py-2">
+              <p className="text-[12px] text-[var(--color-text-soft)]">
+                Allow Echoes (Replies)
+              </p>
+              <button
+                type="button"
+                onClick={() => setAllowEchoesOnPost((previous) => !previous)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                  allowEchoesOnPost
+                    ? "bg-[var(--color-brand)]"
+                    : "bg-[var(--color-bg-hover)]"
+                }`}
+                aria-pressed={allowEchoesOnPost}
+                aria-label="Allow Echoes (Replies)"
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+                    allowEchoesOnPost ? "translate-x-5" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
             <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
               <p className="text-[11px] text-[var(--color-text-muted)]">
                 {draft.trim().length}/1200
@@ -764,6 +963,15 @@ export default function AnonymousSpace({
                     const isLongPost = post.content.length > 290;
                     const velocity = getVelocity(post);
                     const isCollapsing = Boolean(collapsingPosts[post.id]);
+                    const echoesAllowed = echoesEnabledByPost[post.id] ?? true;
+                    const postEchoes = echoesByPost[post.id] || [];
+                    const echoCount = postEchoes.length;
+                    const echoesExpanded = Boolean(expandedEchoesByPost[post.id]);
+                    const currentEchoDraft = echoDraftByPost[post.id] || "";
+                    const selectedEchoIntent = echoIntentByPost[post.id];
+                    const canSendEcho =
+                      currentEchoDraft.trim().length > 0 &&
+                      Boolean(selectedEchoIntent);
 
                     return (
                       <div
@@ -869,7 +1077,107 @@ export default function AnonymousSpace({
                                 </button>
                               );
                             })}
+
+                            {echoesAllowed ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleEchoThread(post.id)}
+                                className="inline-flex h-10 w-full items-center justify-between gap-2 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 text-[12px] text-[var(--color-text-soft)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-primary)] sm:w-auto sm:justify-start"
+                              >
+                                <span className="inline-flex items-center gap-1.5">
+                                  <MessageSquare className="h-3.5 w-3.5" />
+                                  {echoCount} Echoes
+                                </span>
+                              </button>
+                            ) : (
+                              <span className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 text-[12px] text-[var(--color-text-muted)] sm:w-auto">
+                                <Lock className="h-3.5 w-3.5" />
+                                Echoes disabled
+                              </span>
+                            )}
                           </div>
+
+                          {echoesAllowed && echoesExpanded && (
+                            <div className="mt-3 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] p-3">
+                              <div className="space-y-2">
+                                {postEchoes.length === 0 ? (
+                                  <p className="text-[12px] text-[var(--color-text-muted)]">
+                                    No Echoes yet. Start the first quiet reply.
+                                  </p>
+                                ) : (
+                                  postEchoes.map((echo) => (
+                                    <div
+                                      key={echo.id}
+                                      className="ml-3 border-l border-[var(--color-line-soft)] pl-3"
+                                    >
+                                      <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
+                                        {echo.authorType === "author" ? (
+                                          <span className="rounded-full border border-emerald-400/40 bg-emerald-400/12 px-2 py-0.5 text-emerald-200 shadow-[0_0_14px_rgba(16,185,129,0.25)]">
+                                            Author
+                                          </span>
+                                        ) : (
+                                          <span>{echo.alias || "Echo"}</span>
+                                        )}
+                                        <span>.</span>
+                                        <span className="text-[10px] uppercase tracking-[0.08em]">
+                                          {
+                                            echoIntentOptions.find(
+                                              (option) => option.key === echo.intent,
+                                            )?.label
+                                          }
+                                        </span>
+                                        <span>.</span>
+                                        <time dateTime={echo.createdAt}>
+                                          {formatPostTimestamp(echo.createdAt)}
+                                        </time>
+                                      </div>
+                                      <p className="pb-2 text-[13px] text-[var(--color-text-soft)]">
+                                        {echo.text}
+                                      </p>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+
+                              <div className="mt-3 border-t border-[var(--color-line-soft)] pt-3">
+                                <div className="mb-2 flex flex-wrap gap-1.5">
+                                  {echoIntentOptions.map((option) => (
+                                    <button
+                                      key={`${post.id}-${option.key}`}
+                                      type="button"
+                                      onClick={() => updateEchoIntent(post.id, option.key)}
+                                      className={`rounded-full border px-2.5 py-1 text-[11px] transition ${
+                                        selectedEchoIntent === option.key
+                                          ? "border-[var(--color-brand)] bg-[var(--color-brand-soft)] text-[var(--color-brand)]"
+                                          : "border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] text-[var(--color-text-muted)]"
+                                      }`}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  ))}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    value={currentEchoDraft}
+                                    onChange={(event) =>
+                                      updateEchoDraft(post.id, event.target.value)
+                                    }
+                                    placeholder="Write an Echo..."
+                                    className="h-10 min-w-0 flex-1 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] px-3 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-line-strong)]"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => submitEcho(post.id)}
+                                    disabled={!canSendEcho}
+                                    className="inline-flex h-10 items-center rounded-full bg-[var(--color-brand)] px-3 text-[12px] font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Send
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
@@ -914,7 +1222,7 @@ export default function AnonymousSpace({
               <p className="text-[14px] font-semibold">About this space</p>
               <ul className="mt-2 space-y-1.5 text-[12px] text-[var(--color-text-soft)]">
                 <li>No accounts, names, or profile layers.</li>
-                <li>Text comments are disabled to reduce hostility.</li>
+                <li>Optional Echoes allow for quiet, constructive conversations.</li>
                 <li>Empathy-only responses keep signals constructive.</li>
                 <li>Three reports hide a post automatically.</li>
                 <li>Region uses country header only, never raw IP storage.</li>
