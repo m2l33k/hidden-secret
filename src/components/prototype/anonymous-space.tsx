@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import {
+  Bell,
   Check,
   Flag,
   Globe,
@@ -14,6 +15,7 @@ import {
   Lock,
   MessageCircleHeart,
   MessageSquare,
+  LoaderCircle,
   Search,
   SendHorizontal,
   Sparkles,
@@ -46,6 +48,7 @@ type Toast = {
 type FeedScope = "global" | "local";
 type SortMode = "latest" | "trending" | "relatable";
 type EchoIntent = "perspective" | "question" | "experience";
+type ResonanceTab = "notifications" | "signals";
 
 type EchoEntry = {
   id: string;
@@ -56,11 +59,19 @@ type EchoEntry = {
   alias?: string;
 };
 
+type ResonanceNotification = {
+  id: number;
+  message: string;
+  createdAt: string;
+  isNew: boolean;
+};
+
 const SESSION_KEY = "anonymous-space.session-id";
 const REACTIONS_KEY = "anonymous-space.reactions";
 const REPORTS_KEY = "anonymous-space.reports";
 const FEED_SCOPE_KEY = "anonymous-space.feed-scope";
 const QUIET_OATH_KEY = "hasAgreedToRules";
+const SENTINEL_DELAY_MS = 1500;
 
 const quietOathRules = [
   "Speak with empathy, not dominance.",
@@ -130,6 +141,32 @@ const auraClasses = [
   "border-l-2 border-l-sky-500/38",
 ] as const;
 
+const auraGradientPalette = [
+  "bg-gradient-to-br from-slate-700 via-zinc-800 to-zinc-950",
+  "bg-gradient-to-br from-zinc-700 via-zinc-800 to-orange-950",
+  "bg-gradient-to-br from-teal-900 via-zinc-900 to-zinc-950",
+  "bg-gradient-to-br from-slate-800 via-teal-900 to-zinc-950",
+  "bg-gradient-to-br from-zinc-700 via-red-900 to-zinc-950",
+  "bg-gradient-to-br from-orange-900 via-zinc-900 to-zinc-950",
+  "bg-gradient-to-br from-rose-900 via-zinc-900 to-zinc-950",
+  "bg-gradient-to-br from-zinc-700 via-teal-950 to-slate-950",
+] as const;
+
+const mockResonanceNotifications: ResonanceNotification[] = [
+  {
+    id: 1,
+    message: "Echo Nova replied to your idea.",
+    createdAt: "2026-03-22T10:05:00.000Z",
+    isNew: true,
+  },
+  {
+    id: 2,
+    message: "Your post reached 12 empathy signals.",
+    createdAt: "2026-03-22T09:21:00.000Z",
+    isNew: false,
+  },
+];
+
 function createSessionId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -164,6 +201,12 @@ function pickEchoAlias(seed: string) {
   return `Echo ${echoNamePool[aliasIndex]}`;
 }
 
+function generateAura(seed: string) {
+  const normalizedSeed = seed.trim().toLowerCase() || "anonymous";
+  const auraIndex = hashSeed(normalizedSeed) % auraGradientPalette.length;
+  return auraGradientPalette[auraIndex];
+}
+
 export default function AnonymousSpace({
   initialCategory,
   activeLocale,
@@ -181,6 +224,15 @@ export default function AnonymousSpace({
   const [isComposeFocused, setIsComposeFocused] = useState(false);
   const [allowEchoesOnPost, setAllowEchoesOnPost] = useState(true);
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+  const [isResonanceOpen, setIsResonanceOpen] = useState(false);
+  const [resonanceTab, setResonanceTab] = useState<ResonanceTab>("notifications");
+  const [resonanceNotifications, setResonanceNotifications] = useState<
+    ResonanceNotification[]
+  >(mockResonanceNotifications);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isScanningEchoByPost, setIsScanningEchoByPost] = useState<
+    Record<string, true>
+  >({});
   const [showQuietOath, setShowQuietOath] = useState(false);
   const [isQuietOathExiting, setIsQuietOathExiting] = useState(false);
   const [oathChecks, setOathChecks] = useState<[boolean, boolean, boolean]>([
@@ -271,10 +323,21 @@ export default function AnonymousSpace({
   const toastCounterRef = useRef(0);
   const postCounterRef = useRef(0);
   const echoCounterRef = useRef(0);
+  const notificationCounterRef = useRef(
+    mockResonanceNotifications.reduce((max, notification) => {
+      return Math.max(max, notification.id);
+    }, 0),
+  );
+  const pendingTimeoutsRef = useRef<number[]>([]);
+  const postsRef = useRef(posts);
 
   useEffect(() => {
     setComposerCategory(initialCategory);
   }, [initialCategory]);
+
+  useEffect(() => {
+    postsRef.current = posts;
+  }, [posts]);
 
   useEffect(() => {
     const existingSessionId = localStorage.getItem(SESSION_KEY);
@@ -306,7 +369,7 @@ export default function AnonymousSpace({
   }, []);
 
   useEffect(() => {
-    if (!showQuietOath && !isPrivacyModalOpen) {
+    if (!showQuietOath && !isPrivacyModalOpen && !isResonanceOpen) {
       return;
     }
 
@@ -315,7 +378,16 @@ export default function AnonymousSpace({
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [isPrivacyModalOpen, showQuietOath]);
+  }, [isPrivacyModalOpen, isResonanceOpen, showQuietOath]);
+
+  useEffect(() => {
+    return () => {
+      pendingTimeoutsRef.current.forEach((timeoutId) =>
+        window.clearTimeout(timeoutId),
+      );
+      pendingTimeoutsRef.current = [];
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(REACTIONS_KEY, JSON.stringify(reactionsByPost));
@@ -353,6 +425,97 @@ export default function AnonymousSpace({
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 2400);
+  };
+
+  const queueTimeout = (callback: () => void, delay: number) => {
+    const timeoutId = window.setTimeout(() => {
+      pendingTimeoutsRef.current = pendingTimeoutsRef.current.filter(
+        (id) => id !== timeoutId,
+      );
+      callback();
+    }, delay);
+
+    pendingTimeoutsRef.current.push(timeoutId);
+  };
+
+  const openResonanceDrawer = () => {
+    setResonanceTab("notifications");
+    setIsResonanceOpen(true);
+    setResonanceNotifications((previous) =>
+      previous.map((notification) =>
+        notification.isNew ? { ...notification, isNew: false } : notification,
+      ),
+    );
+  };
+
+  const removeSignalFromState = (postId: string) => {
+    setPosts((previous) => previous.filter((post) => post.id !== postId));
+    setEchoesEnabledByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setPostAuthorSessionByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setEchoesByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setExpandedEchoesByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setEchoDraftByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setEchoIntentByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setReactionsByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setReportsByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setDismissedPosts((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setCollapsingPosts((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setExpandedPosts((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+    setIsScanningEchoByPost((previous) => {
+      const next = { ...previous };
+      delete next[postId];
+      return next;
+    });
+  };
+
+  const vaporizeSignal = (postId: string) => {
+    removeSignalFromState(postId);
+    triggerHaptic(8);
+    pushToast("Signal vaporized.");
   };
 
   const getReportCount = (post: PrototypePost) =>
@@ -435,6 +598,13 @@ export default function AnonymousSpace({
   const hiddenByReports = filterByScope(posts).filter(
     (post) => post.category === initialCategory && getReportCount(post) >= 3,
   ).length;
+  const hasNewActivity = resonanceNotifications.some(
+    (notification) => notification.isNew,
+  );
+  const mySignals = posts.filter(
+    (post) => postAuthorSessionByPost[post.id] === sessionId,
+  );
+  const primaryAuraClass = generateAura(sessionId || "anonymous");
 
   const getCategoryCount = (category: CategorySlug) => {
     const categoryScoped = filterByScope(
@@ -452,10 +622,11 @@ export default function AnonymousSpace({
     event.preventDefault();
     const trimmedDraft = draft.trim();
 
-    if (!trimmedDraft) {
+    if (!trimmedDraft || isPublishing) {
       return;
     }
 
+    setIsPublishing(true);
     postCounterRef.current += 1;
     const newPost: PrototypePost = {
       id: `local-${sessionId || "anon"}-${postCounterRef.current}`,
@@ -472,20 +643,23 @@ export default function AnonymousSpace({
       },
     };
 
-    setEchoesEnabledByPost((previous) => ({
-      ...previous,
-      [newPost.id]: allowEchoesOnPost,
-    }));
-    setPostAuthorSessionByPost((previous) => ({
-      ...previous,
-      [newPost.id]: sessionId || "anon",
-    }));
+    queueTimeout(() => {
+      setEchoesEnabledByPost((previous) => ({
+        ...previous,
+        [newPost.id]: allowEchoesOnPost,
+      }));
+      setPostAuthorSessionByPost((previous) => ({
+        ...previous,
+        [newPost.id]: sessionId || "anon",
+      }));
 
-    setPosts((previous) => [newPost, ...previous]);
-    setDraft("");
-    setIsComposeFocused(false);
-    triggerHaptic(18);
-    pushToast("Post published into the void.");
+      setPosts((previous) => [newPost, ...previous]);
+      setDraft("");
+      setIsComposeFocused(false);
+      setIsPublishing(false);
+      triggerHaptic(18);
+      pushToast("Post published into the void.");
+    }, SENTINEL_DELAY_MS);
   };
 
   const reactToPost = (postId: string, reaction: ReactionType) => {
@@ -561,6 +735,10 @@ export default function AnonymousSpace({
   };
 
   const submitEcho = (postId: string) => {
+    if (isScanningEchoByPost[postId]) {
+      return;
+    }
+
     const draftText = (echoDraftByPost[postId] || "").trim();
     const intent = echoIntentByPost[postId];
 
@@ -594,15 +772,46 @@ export default function AnonymousSpace({
       alias,
     };
 
-    setEchoesByPost((previous) => ({
-      ...previous,
-      [postId]: [...(previous[postId] || []), echo],
-    }));
-    setExpandedEchoesByPost((previous) => ({ ...previous, [postId]: true }));
-    setEchoDraftByPost((previous) => ({ ...previous, [postId]: "" }));
-    setEchoIntentByPost((previous) => ({ ...previous, [postId]: undefined }));
-    triggerHaptic(10);
-    pushToast("Echo sent.");
+    setIsScanningEchoByPost((previous) => ({ ...previous, [postId]: true }));
+    queueTimeout(() => {
+      if (!postsRef.current.some((post) => post.id === postId)) {
+        setIsScanningEchoByPost((previous) => {
+          const next = { ...previous };
+          delete next[postId];
+          return next;
+        });
+        return;
+      }
+
+      setEchoesByPost((previous) => ({
+        ...previous,
+        [postId]: [...(previous[postId] || []), echo],
+      }));
+      setExpandedEchoesByPost((previous) => ({ ...previous, [postId]: true }));
+      setEchoDraftByPost((previous) => ({ ...previous, [postId]: "" }));
+      setEchoIntentByPost((previous) => ({ ...previous, [postId]: undefined }));
+      setIsScanningEchoByPost((previous) => {
+        const next = { ...previous };
+        delete next[postId];
+        return next;
+      });
+
+      if (!isAuthorReply && postAuthorSession === sessionId) {
+        notificationCounterRef.current += 1;
+        setResonanceNotifications((previous) => [
+          {
+            id: notificationCounterRef.current,
+            message: `${alias || "An Echo"} replied to your signal.`,
+            createdAt: new Date().toISOString(),
+            isNew: true,
+          },
+          ...previous,
+        ]);
+      }
+
+      triggerHaptic(10);
+      pushToast("Echo sent.");
+    }, SENTINEL_DELAY_MS);
   };
 
   const changeLocale = (nextLocale: SupportedLocale) => {
@@ -629,9 +838,11 @@ export default function AnonymousSpace({
   };
 
   const destroyIdentity = () => {
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.setItem(SESSION_KEY, createSessionId());
-    window.location.reload();
+    const freshSessionId = createSessionId();
+    localStorage.setItem(SESSION_KEY, freshSessionId);
+    setSessionId(freshSessionId);
+    triggerHaptic(16);
+    pushToast("Identity regenerated. Aura refreshed.");
   };
 
   return (
@@ -705,6 +916,19 @@ export default function AnonymousSpace({
                 ))}
               </select>
             </label>
+
+            <button
+              type="button"
+              onClick={openResonanceDrawer}
+              className="relative inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] px-2.5 text-[12px] text-[var(--color-text-soft)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-primary)]"
+              aria-label="Resonance activity"
+            >
+              <Bell className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Resonance</span>
+              {hasNewActivity && (
+                <span className="absolute right-2.5 top-2 inline-flex h-2 w-2 rounded-full bg-orange-400 shadow-[0_0_10px_rgba(251,146,60,0.6)]" />
+              )}
+            </button>
 
             <button
               type="button"
@@ -919,11 +1143,20 @@ export default function AnonymousSpace({
                 </span>
                 <button
                   type="submit"
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() || isPublishing}
                   className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--color-brand)] px-3.5 text-[12px] font-semibold text-[var(--color-brand-text)] transition hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <SendHorizontal className="h-3.5 w-3.5" />
-                  Publish
+                  {isPublishing ? (
+                    <>
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                      Scanning intent...
+                    </>
+                  ) : (
+                    <>
+                      <SendHorizontal className="h-3.5 w-3.5" />
+                      Publish
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -969,6 +1202,7 @@ export default function AnonymousSpace({
                     const echoesExpanded = Boolean(expandedEchoesByPost[post.id]);
                     const currentEchoDraft = echoDraftByPost[post.id] || "";
                     const selectedEchoIntent = echoIntentByPost[post.id];
+                    const isEchoScanning = Boolean(isScanningEchoByPost[post.id]);
                     const canSendEcho =
                       currentEchoDraft.trim().length > 0 &&
                       Boolean(selectedEchoIntent);
@@ -1112,11 +1346,21 @@ export default function AnonymousSpace({
                                     >
                                       <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
                                         {echo.authorType === "author" ? (
-                                          <span className="rounded-full border border-emerald-400/40 bg-emerald-400/12 px-2 py-0.5 text-emerald-200 shadow-[0_0_14px_rgba(16,185,129,0.25)]">
-                                            Author
+                                          <span className="inline-flex items-center gap-1.5">
+                                            <span className="h-6 w-6 rounded-full bg-orange-600/80 ring-2 ring-orange-500/30 ring-offset-1 ring-offset-zinc-950 shadow-[0_0_14px_rgba(249,115,22,0.42)]" />
+                                            <span className="rounded-full border border-emerald-400/40 bg-emerald-400/12 px-2 py-0.5 text-emerald-200 shadow-[0_0_14px_rgba(16,185,129,0.25)]">
+                                              Original Author
+                                            </span>
                                           </span>
                                         ) : (
-                                          <span>{echo.alias || "Echo"}</span>
+                                          <span className="inline-flex items-center gap-1.5">
+                                            <span
+                                              className={`h-6 w-6 rounded-full ring-1 ring-zinc-700/70 ${generateAura(
+                                                echo.alias || "Echo",
+                                              )}`}
+                                            />
+                                            <span>{echo.alias || "Echo"}</span>
+                                          </span>
                                         )}
                                         <span>.</span>
                                         <span className="text-[10px] uppercase tracking-[0.08em]">
@@ -1169,10 +1413,17 @@ export default function AnonymousSpace({
                                   <button
                                     type="button"
                                     onClick={() => submitEcho(post.id)}
-                                    disabled={!canSendEcho}
-                                    className="inline-flex h-10 items-center rounded-full bg-[var(--color-brand)] px-3 text-[12px] font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                                    disabled={!canSendEcho || isEchoScanning}
+                                    className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--color-brand)] px-3 text-[12px] font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
                                   >
-                                    Send
+                                    {isEchoScanning ? (
+                                      <>
+                                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                        Scanning intent...
+                                      </>
+                                    ) : (
+                                      "Send Echo"
+                                    )}
                                   </button>
                                 </div>
                               </div>
@@ -1232,6 +1483,132 @@ export default function AnonymousSpace({
         </aside>
       </main>
 
+      <div
+        className={`fixed inset-0 z-50 ${
+          isResonanceOpen ? "pointer-events-auto" : "pointer-events-none"
+        }`}
+      >
+        <button
+          type="button"
+          aria-label="Close Resonance"
+          onClick={() => setIsResonanceOpen(false)}
+          className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${
+            isResonanceOpen ? "opacity-100" : "opacity-0"
+          }`}
+        />
+        <aside
+          className={`fixed right-0 top-0 h-full w-80 bg-zinc-950 border-l border-zinc-800 z-50 flex transform flex-col transition-transform duration-300 ease-out ${
+            isResonanceOpen ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+            <p className="text-sm font-semibold text-zinc-100">Resonance</p>
+            <button
+              type="button"
+              onClick={() => setIsResonanceOpen(false)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-300 transition hover:text-zinc-100"
+              aria-label="Close Resonance drawer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="border-b border-zinc-800 px-4 py-4 text-center">
+            <div
+              className={`mx-auto h-12 w-12 rounded-full ring-1 ring-zinc-600/70 shadow-[0_0_22px_rgba(15,23,42,0.55)] ${primaryAuraClass}`}
+            />
+            <p className="mt-2 text-[11px] text-zinc-400">
+              Your current visual signal
+            </p>
+          </div>
+
+          <div className="border-b border-zinc-800 p-2">
+            <div className="grid grid-cols-2 gap-1 rounded-full border border-zinc-800 bg-zinc-900 p-1">
+              <button
+                type="button"
+                onClick={() => setResonanceTab("notifications")}
+                className={`h-8 rounded-full text-[12px] transition ${
+                  resonanceTab === "notifications"
+                    ? "bg-orange-500/20 text-orange-200"
+                    : "text-zinc-400 hover:text-zinc-100"
+                }`}
+              >
+                Notifications
+              </button>
+              <button
+                type="button"
+                onClick={() => setResonanceTab("signals")}
+                className={`h-8 rounded-full text-[12px] transition ${
+                  resonanceTab === "signals"
+                    ? "bg-orange-500/20 text-orange-200"
+                    : "text-zinc-400 hover:text-zinc-100"
+                }`}
+              >
+                My Signals
+              </button>
+            </div>
+          </div>
+
+          <div className="hide-scrollbar flex-1 space-y-2 overflow-y-auto p-3">
+            {resonanceTab === "notifications" ? (
+              resonanceNotifications.length === 0 ? (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-[12px] text-zinc-400">
+                  No new activity.
+                </div>
+              ) : (
+                resonanceNotifications.map((notification) => (
+                  <article
+                    key={notification.id}
+                    className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[12px] text-zinc-200">{notification.message}</p>
+                      {notification.isNew && (
+                        <span className="mt-1 inline-flex h-2 w-2 shrink-0 rounded-full bg-orange-400" />
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-zinc-500">
+                      {formatPostTimestamp(notification.createdAt)}
+                    </p>
+                  </article>
+                ))
+              )
+            ) : mySignals.length === 0 ? (
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-[12px] text-zinc-400">
+                You have not published any signals in this session yet.
+              </div>
+            ) : (
+              mySignals.map((post) => (
+                <article
+                  key={post.id}
+                  className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
+                >
+                  <p className="line-clamp-3 whitespace-pre-wrap text-[12px] text-zinc-200">
+                    {post.content}
+                  </p>
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-zinc-500">
+                    <span>
+                      {CATEGORIES.find((category) => category.slug === post.category)
+                        ?.label || "Signal"}
+                    </span>
+                    <time dateTime={post.createdAt}>
+                      {formatPostTimestamp(post.createdAt)}
+                    </time>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => vaporizeSignal(post.id)}
+                    className="inline-flex h-8 items-center rounded-full border border-red-500/45 bg-red-500/15 px-3 text-[11px] font-medium text-red-200 transition hover:bg-red-500/25"
+                  >
+                    Vaporize
+                  </button>
+                </article>
+              ))
+            )}
+          </div>
+        </aside>
+      </div>
+
       {isPrivacyModalOpen && (
         <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/70 px-3 backdrop-blur-sm">
           <button
@@ -1252,6 +1629,15 @@ export default function AnonymousSpace({
               >
                 <X className="h-4 w-4" />
               </button>
+            </div>
+
+            <div className="mt-3 text-center">
+              <div
+                className={`mx-auto h-12 w-12 rounded-full ring-1 ring-zinc-700/70 shadow-[0_0_22px_rgba(15,23,42,0.55)] ${primaryAuraClass}`}
+              />
+              <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+                Your current visual signal
+              </p>
             </div>
 
             <p className="mt-3 text-[12px] text-[var(--color-text-soft)]">Session UUID</p>
