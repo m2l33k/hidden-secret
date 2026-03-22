@@ -1,26 +1,81 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-bg-0: #111215;
+  --color-bg-top: #101114;
+  --color-bg-surface: #1a1c1f;
+  --color-bg-elevated: #24272d;
+  --color-bg-hover: #2a2d34;
+  --color-line-soft: #343841;
+  --color-line-strong: #4b515c;
+  --color-text-primary: #d7dadc;
+  --color-text-soft: #a7acb3;
+  --color-text-muted: #7f858f;
+  --color-brand: #ff4500;
+  --color-brand-text: #ffffff;
+  --color-brand-soft: #3a241b;
+  --color-chip-blue: #1f3656;
+  --color-chip-blue-text: #b3d4ff;
+  --color-chip-amber: #4c3415;
+  --color-chip-amber-text: #ffd89a;
+  --color-chip-magenta: #47203f;
+  --color-chip-magenta-text: #f0b3e0;
+  --font-display: var(--font-ui);
+  --font-label: var(--font-ui);
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 18px;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-background: var(--color-bg-0);
+  --color-foreground: var(--color-text-primary);
+  --font-sans: var(--font-label);
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Consolas,
+    "Liberation Mono", Menlo, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg-0);
+  color: var(--color-text-primary);
+  font-family: var(--font-label);
+  line-height: 1.45;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-brand) 32%, transparent);
+  color: var(--color-text-primary);
+}
+
+.feed-enter {
+  animation: feed-enter 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes feed-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
