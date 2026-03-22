@@ -265,10 +265,6 @@ export default function AnonymousSpace({ initialCategory }: Props) {
 
   return (
     <div className="min-h-screen bg-[var(--color-bg-0)] text-[var(--color-text-primary)]">
-      {isComposing && (
-        <div className="pointer-events-none fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px] transition-opacity" />
-      )}
-
       <header className="sticky top-0 z-50 border-b border-[var(--color-line-soft)] bg-[var(--color-bg-top)]/95 backdrop-blur-sm">
         <div className="mx-auto flex h-12 w-full max-w-[1400px] items-center gap-2 px-2.5 md:h-14 md:gap-3 md:px-4">
           <Link
@@ -431,129 +427,141 @@ export default function AnonymousSpace({ initialCategory }: Props) {
             </div>
           </form>
 
-          {hiddenByReports > 0 && (
-            <div className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] px-3 py-2 text-[12px] text-[var(--color-text-soft)]">
-              {hiddenByReports} post{hiddenByReports > 1 ? "s are" : " is"} hidden
-              after crossing the 3-report threshold.
-            </div>
-          )}
+          <div className="relative">
+            {isComposing && (
+              <div className="pointer-events-none absolute inset-0 z-30 rounded-xl bg-black/45 backdrop-blur-[2px] transition-opacity" />
+            )}
 
-          {visiblePosts.length === 0 ? (
-            <div className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] px-4 py-8 text-center">
-              <Inbox className="mx-auto h-8 w-8 text-[var(--color-text-muted)]" />
-              <p className="mt-3 text-[14px] font-medium text-[var(--color-text-primary)]">
-                It&apos;s quiet in here.
-              </p>
-              <p className="mt-1 text-[12px] text-[var(--color-text-muted)]">
-                Be the first to break the silence.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {visiblePosts.map((post, index) => {
-                const alreadyReacted = reactionsByPost[post.id];
-                const reportCount = getReportCount(post);
-                const hasReported = Boolean(reportsByPost[post.id]);
-                const CategoryIcon = categoryIcon[post.category];
-                const isExpanded = Boolean(expandedPosts[post.id]);
-                const isLongPost = post.content.length > 300;
+            <div
+              className={`space-y-2 transition-all ${
+                isComposing ? "scale-[0.995] opacity-80" : ""
+              }`}
+            >
+              {hiddenByReports > 0 && (
+                <div className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] px-3 py-2 text-[12px] text-[var(--color-text-soft)]">
+                  {hiddenByReports} post{hiddenByReports > 1 ? "s are" : " is"} hidden
+                  after crossing the 3-report threshold.
+                </div>
+              )}
 
-                return (
-                  <article
-                    key={post.id}
-                    className={`feed-enter rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 transition-colors md:p-3 ${cardHoverClass[post.category]}`}
-                    style={{ animationDelay: `${index * 30}ms` }}
-                  >
-                    <header className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${categoryClass[post.category]}`}
+              {visiblePosts.length === 0 ? (
+                <div className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] px-4 py-8 text-center">
+                  <Inbox className="mx-auto h-8 w-8 text-[var(--color-text-muted)]" />
+                  <p className="mt-3 text-[14px] font-medium text-[var(--color-text-primary)]">
+                    It&apos;s quiet in here.
+                  </p>
+                  <p className="mt-1 text-[12px] text-[var(--color-text-muted)]">
+                    Be the first to break the silence.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {visiblePosts.map((post, index) => {
+                    const alreadyReacted = reactionsByPost[post.id];
+                    const reportCount = getReportCount(post);
+                    const hasReported = Boolean(reportsByPost[post.id]);
+                    const CategoryIcon = categoryIcon[post.category];
+                    const isExpanded = Boolean(expandedPosts[post.id]);
+                    const isLongPost = post.content.length > 300;
+
+                    return (
+                      <article
+                        key={post.id}
+                        className={`feed-enter rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 transition-colors md:p-3 ${cardHoverClass[post.category]}`}
+                        style={{ animationDelay: `${index * 30}ms` }}
                       >
-                        <CategoryIcon className="h-3.5 w-3.5" />
-                        {
-                          CATEGORIES.find((category) => category.slug === post.category)
-                            ?.label
-                        }
-                      </span>
-                      <span>•</span>
-                      <time dateTime={post.createdAt}>
-                        {formatDistanceToNow(new Date(post.createdAt), {
-                          addSuffix: true,
-                        })}
-                      </time>
-                    </header>
-
-                    <div
-                      className={`relative overflow-hidden transition-[max-height] duration-300 ${
-                        isLongPost && !isExpanded ? "max-h-36" : "max-h-[1200px]"
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap text-[16px] leading-[1.5] text-[var(--color-text-primary)] md:text-[17px]">
-                        {post.content}
-                      </p>
-                      {isLongPost && !isExpanded && (
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[var(--color-bg-surface)] to-transparent" />
-                      )}
-                    </div>
-
-                    {isLongPost && (
-                      <button
-                        type="button"
-                        onClick={() => toggleReadMore(post.id)}
-                        className="mt-1 text-[12px] text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
-                      >
-                        {isExpanded ? "Show less" : "Read more..."}
-                      </button>
-                    )}
-
-                    <div className="mt-2.5 grid gap-1.5 sm:flex sm:flex-wrap sm:items-center">
-                      {REACTION_TYPES.map((reaction) => {
-                        const Icon = reactionIcon[reaction.key];
-                        const chosen = alreadyReacted === reaction.key;
-                        const popKey = `${post.id}-${reaction.key}`;
-
-                        return (
-                          <button
-                            key={reaction.key}
-                            type="button"
-                            onClick={() => reactToPost(post.id, reaction.key)}
-                            disabled={Boolean(alreadyReacted)}
-                            className={`inline-flex h-10 w-full items-center justify-between gap-2 rounded-full border px-3 text-[12px] transition sm:w-auto sm:justify-start active:scale-95 ${
-                              chosen
-                                ? "border-[var(--color-brand)] bg-[var(--color-brand-soft)] text-[var(--color-brand)] shadow-[0_0_0_1px_rgba(255,69,0,0.3),0_0_20px_rgba(255,69,0,0.22)]"
-                                : "border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] text-[var(--color-text-soft)] hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed"
-                            } ${reactionPopKey === popKey ? "reaction-pop" : ""}`}
+                        <header className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${categoryClass[post.category]}`}
                           >
-                            <span className="inline-flex items-center gap-1.5">
-                              <Icon className="h-3.5 w-3.5" />
-                              {reaction.label}
-                            </span>
-                            <span className="rounded-full bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-[10px]">
-                              {getReactionCount(post, reaction.key)}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                            <CategoryIcon className="h-3.5 w-3.5" />
+                            {
+                              CATEGORIES.find((category) => category.slug === post.category)
+                                ?.label
+                            }
+                          </span>
+                          <span>•</span>
+                          <time dateTime={post.createdAt}>
+                            {formatDistanceToNow(new Date(post.createdAt), {
+                              addSuffix: true,
+                            })}
+                          </time>
+                        </header>
 
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => reportPost(post.id)}
-                        disabled={hasReported || reportCount >= 3}
-                        className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 text-[12px] text-[var(--color-text-muted)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-soft)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <Flag className="h-3.5 w-3.5" />
-                        {hasReported ? "Reported" : "Report"}
-                      </button>
-                      <p className="text-[11px] text-[var(--color-text-muted)]">
-                        {reportCount}/3 reports
-                      </p>
-                    </div>
-                  </article>
-                );
-              })}
+                        <div
+                          className={`relative overflow-hidden transition-[max-height] duration-300 ${
+                            isLongPost && !isExpanded ? "max-h-36" : "max-h-[1200px]"
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap text-[16px] leading-[1.5] text-[var(--color-text-primary)] md:text-[17px]">
+                            {post.content}
+                          </p>
+                          {isLongPost && !isExpanded && (
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[var(--color-bg-surface)] to-transparent" />
+                          )}
+                        </div>
+
+                        {isLongPost && (
+                          <button
+                            type="button"
+                            onClick={() => toggleReadMore(post.id)}
+                            className="mt-1 text-[12px] text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
+                          >
+                            {isExpanded ? "Show less" : "Read more..."}
+                          </button>
+                        )}
+
+                        <div className="mt-2.5 grid gap-1.5 sm:flex sm:flex-wrap sm:items-center">
+                          {REACTION_TYPES.map((reaction) => {
+                            const Icon = reactionIcon[reaction.key];
+                            const chosen = alreadyReacted === reaction.key;
+                            const popKey = `${post.id}-${reaction.key}`;
+
+                            return (
+                              <button
+                                key={reaction.key}
+                                type="button"
+                                onClick={() => reactToPost(post.id, reaction.key)}
+                                disabled={Boolean(alreadyReacted)}
+                                className={`inline-flex h-10 w-full items-center justify-between gap-2 rounded-full border px-3 text-[12px] transition sm:w-auto sm:justify-start active:scale-95 ${
+                                  chosen
+                                    ? "border-[var(--color-brand)] bg-[var(--color-brand-soft)] text-[var(--color-brand)] shadow-[0_0_0_1px_rgba(255,69,0,0.3),0_0_20px_rgba(255,69,0,0.22)]"
+                                    : "border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] text-[var(--color-text-soft)] hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed"
+                                } ${reactionPopKey === popKey ? "reaction-pop" : ""}`}
+                              >
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Icon className="h-3.5 w-3.5" />
+                                  {reaction.label}
+                                </span>
+                                <span className="rounded-full bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-[10px]">
+                                  {getReactionCount(post, reaction.key)}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => reportPost(post.id)}
+                            disabled={hasReported || reportCount >= 3}
+                            className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 text-[12px] text-[var(--color-text-muted)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-soft)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <Flag className="h-3.5 w-3.5" />
+                            {hasReported ? "Reported" : "Report"}
+                          </button>
+                          <p className="text-[11px] text-[var(--color-text-muted)]">
+                            {reportCount}/3 reports
+                          </p>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </section>
 
         <aside className="hidden xl:block">
