@@ -1,3 +1,5 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   CATEGORIES,
   CategorySlug,
@@ -23,20 +25,25 @@ type StoredPost = PrototypePost & {
   authorSessionId: string;
 };
 
-type ModerationStore = {
-  postsById: Map<string, StoredPost>;
+type PersistedStore = {
+  version: 1;
+  postsById: Record<string, StoredPost>;
   postOrder: string[];
-  echoesByPost: Map<string, ServerEcho[]>;
-  reportCountsByPost: Map<string, number>;
-  reportersByPost: Map<string, Set<string>>;
-  publishHitsBySession: Map<string, number[]>;
-  echoHitsBySession: Map<string, number[]>;
+  echoesByPost: Record<string, ServerEcho[]>;
+  reportCountsByPost: Record<string, number>;
+  reportersByPost: Record<string, string[]>;
+  publishHitsBySession: Record<string, number[]>;
+  echoHitsBySession: Record<string, number[]>;
   postCounter: number;
   echoCounter: number;
 };
 
+interface ModerationRepository {
+  load(): Promise<PersistedStore>;
+  save(store: PersistedStore): Promise<void>;
+}
+
 const REPORT_THRESHOLD = 3;
-const SCAN_DELAY_MS = 1500;
 const PUBLISH_RATE_WINDOW_MS = 60_000;
 const ECHO_RATE_WINDOW_MS = 60_000;
 const MAX_PUBLISHES_PER_WINDOW = 4;
@@ -64,6 +71,11 @@ const echoNamePool = [
   "Sierra",
 ];
 
+const STORE_DIR = path.join(process.cwd(), ".data");
+const STORE_FILE = path.join(STORE_DIR, "moderation-store.json");
+
+let mutationQueue: Promise<void> = Promise.resolve();
+
 function hashSeed(input: string) {
   let hash = 0;
   for (let i = 0; i < input.length; i += 1) {
@@ -78,17 +90,13 @@ function pickEchoAlias(seed: string) {
   return `Echo ${echoNamePool[aliasIndex]}`;
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function sanitizeCountryCode(input: string) {
   const normalized = input.trim().toUpperCase();
   return /^[A-Z]{2}$/.test(normalized) ? normalized : "US";
 }
 
 function enforceRateLimit(options: {
-  hitsBySession: Map<string, number[]>;
+  hitsBySession: Record<string, number[]>;
   sessionId: string;
   windowMs: number;
   maxHitsInWindow: number;
@@ -96,8 +104,10 @@ function enforceRateLimit(options: {
   actionName: string;
 }) {
   const now = Date.now();
-  const currentHits = options.hitsBySession.get(options.sessionId) || [];
-  const recentHits = currentHits.filter((timestamp) => now - timestamp <= options.windowMs);
+  const sessionHits = options.hitsBySession[options.sessionId] || [];
+  const recentHits = sessionHits.filter(
+    (timestamp) => now - timestamp <= options.windowMs,
+  );
   const latest = recentHits[recentHits.length - 1];
 
   if (latest && now - latest < options.minIntervalMs) {
@@ -115,14 +125,14 @@ function enforceRateLimit(options: {
   }
 
   recentHits.push(now);
-  options.hitsBySession.set(options.sessionId, recentHits);
+  options.hitsBySession[options.sessionId] = recentHits;
 }
 
-function createInitialStore(): ModerationStore {
-  const postsById = new Map<string, StoredPost>();
+function createInitialStore(): PersistedStore {
+  const postsById: Record<string, StoredPost> = {};
   const postOrder: string[] = [];
-  const reportCountsByPost = new Map<string, number>();
-  const reportersByPost = new Map<string, Set<string>>();
+  const reportCountsByPost: Record<string, number> = {};
+  const reportersByPost: Record<string, string[]> = {};
 
   MOCK_POSTS.forEach((post, index) => {
     const storedPost: StoredPost = {
@@ -131,73 +141,131 @@ function createInitialStore(): ModerationStore {
       authorSessionId: `seed-author-${index + 1}`,
     };
 
-    postsById.set(storedPost.id, storedPost);
+    postsById[storedPost.id] = storedPost;
     postOrder.push(storedPost.id);
-    reportCountsByPost.set(storedPost.id, storedPost.baseReports);
-    reportersByPost.set(storedPost.id, new Set());
+    reportCountsByPost[storedPost.id] = storedPost.baseReports;
+    reportersByPost[storedPost.id] = [];
   });
 
-  const echoesByPost = new Map<string, ServerEcho[]>();
-  echoesByPost.set("post-1", [
-    {
-      id: "echo-seed-1",
-      text: "I have seen this work in small workshops. It changes the tone instantly.",
-      intent: "experience",
-      createdAt: "2026-03-22T07:35:00.000Z",
-      authorType: "echo",
-      alias: "Echo Atlas",
-    },
-  ]);
-  echoesByPost.set("post-2", [
-    {
-      id: "echo-seed-2",
-      text: "Could this be hosted weekly in schools too?",
-      intent: "question",
-      createdAt: "2026-03-22T06:20:00.000Z",
-      authorType: "echo",
-      alias: "Echo Nova",
-    },
-    {
-      id: "echo-seed-3",
-      text: "Yes, but only if facilitators are trained to hold silence safely.",
-      intent: "perspective",
-      createdAt: "2026-03-22T06:10:00.000Z",
-      authorType: "author",
-    },
-  ]);
-  echoesByPost.set("post-5", [
-    {
-      id: "echo-seed-4",
-      text: "Hard truth. Shared docs plus async votes would solve half of this.",
-      intent: "perspective",
-      createdAt: "2026-03-21T15:55:00.000Z",
-      authorType: "echo",
-      alias: "Echo Lumen",
-    },
-  ]);
+  const echoesByPost: Record<string, ServerEcho[]> = {
+    "post-1": [
+      {
+        id: "echo-seed-1",
+        text: "I have seen this work in small workshops. It changes the tone instantly.",
+        intent: "experience",
+        createdAt: "2026-03-22T07:35:00.000Z",
+        authorType: "echo",
+        alias: "Echo Atlas",
+      },
+    ],
+    "post-2": [
+      {
+        id: "echo-seed-2",
+        text: "Could this be hosted weekly in schools too?",
+        intent: "question",
+        createdAt: "2026-03-22T06:20:00.000Z",
+        authorType: "echo",
+        alias: "Echo Nova",
+      },
+      {
+        id: "echo-seed-3",
+        text: "Yes, but only if facilitators are trained to hold silence safely.",
+        intent: "perspective",
+        createdAt: "2026-03-22T06:10:00.000Z",
+        authorType: "author",
+      },
+    ],
+    "post-5": [
+      {
+        id: "echo-seed-4",
+        text: "Hard truth. Shared docs plus async votes would solve half of this.",
+        intent: "perspective",
+        createdAt: "2026-03-21T15:55:00.000Z",
+        authorType: "echo",
+        alias: "Echo Lumen",
+      },
+    ],
+  };
 
   return {
+    version: 1,
     postsById,
     postOrder,
     echoesByPost,
     reportCountsByPost,
     reportersByPost,
-    publishHitsBySession: new Map<string, number[]>(),
-    echoHitsBySession: new Map<string, number[]>(),
+    publishHitsBySession: {},
+    echoHitsBySession: {},
     postCounter: 0,
     echoCounter: 0,
   };
 }
 
-declare global {
-  var __quietSignalModerationStore: ModerationStore | undefined;
+class FileModerationRepository implements ModerationRepository {
+  private initialized = false;
+
+  private async ensureInitialized() {
+    if (this.initialized) {
+      return;
+    }
+
+    await mkdir(STORE_DIR, { recursive: true });
+    try {
+      await readFile(STORE_FILE, "utf8");
+    } catch {
+      await this.save(createInitialStore());
+    }
+
+    this.initialized = true;
+  }
+
+  async load(): Promise<PersistedStore> {
+    await this.ensureInitialized();
+    const raw = await readFile(STORE_FILE, "utf8");
+    const parsed = JSON.parse(raw) as PersistedStore;
+    return normalizeStore(parsed);
+  }
+
+  async save(store: PersistedStore): Promise<void> {
+    await mkdir(STORE_DIR, { recursive: true });
+    const tempFile = `${STORE_FILE}.tmp`;
+    await writeFile(tempFile, JSON.stringify(store, null, 2), "utf8");
+    await rename(tempFile, STORE_FILE);
+  }
 }
 
-const store =
-  globalThis.__quietSignalModerationStore || createInitialStore();
+function normalizeStore(store: PersistedStore): PersistedStore {
+  return {
+    version: 1,
+    postsById: store.postsById || {},
+    postOrder: store.postOrder || [],
+    echoesByPost: store.echoesByPost || {},
+    reportCountsByPost: store.reportCountsByPost || {},
+    reportersByPost: store.reportersByPost || {},
+    publishHitsBySession: store.publishHitsBySession || {},
+    echoHitsBySession: store.echoHitsBySession || {},
+    postCounter: typeof store.postCounter === "number" ? store.postCounter : 0,
+    echoCounter: typeof store.echoCounter === "number" ? store.echoCounter : 0,
+  };
+}
 
-if (process.env.NODE_ENV !== "production") {
-  globalThis.__quietSignalModerationStore = store;
+const repository: ModerationRepository = new FileModerationRepository();
+
+async function runMutation<T>(
+  mutator: (store: PersistedStore) => Promise<T> | T,
+): Promise<T> {
+  const task = mutationQueue.then(async () => {
+    const store = await repository.load();
+    const result = await mutator(store);
+    await repository.save(store);
+    return result;
+  });
+
+  mutationQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
 }
 
 export class ModerationError extends Error {
@@ -222,7 +290,9 @@ export async function publishSignal(
 ) {
   const content = payload.content.trim();
   if (!content || content.length > 1200) {
-    throw new ModerationError("Post content must be between 1 and 1200 characters.");
+    throw new ModerationError(
+      "Post content must be between 1 and 1200 characters.",
+    );
   }
 
   if (!categorySet.has(payload.category as CategorySlug)) {
@@ -233,47 +303,47 @@ export async function publishSignal(
     throw new ModerationError("Unsupported language.");
   }
 
-  enforceRateLimit({
-    hitsBySession: store.publishHitsBySession,
-    sessionId,
-    windowMs: PUBLISH_RATE_WINDOW_MS,
-    maxHitsInWindow: MAX_PUBLISHES_PER_WINDOW,
-    minIntervalMs: MIN_PUBLISH_INTERVAL_MS,
-    actionName: "publish",
+  return runMutation((store) => {
+    enforceRateLimit({
+      hitsBySession: store.publishHitsBySession,
+      sessionId,
+      windowMs: PUBLISH_RATE_WINDOW_MS,
+      maxHitsInWindow: MAX_PUBLISHES_PER_WINDOW,
+      minIntervalMs: MIN_PUBLISH_INTERVAL_MS,
+      actionName: "publish",
+    });
+
+    store.postCounter += 1;
+    const newPost: StoredPost = {
+      id: `srv-${Date.now()}-${store.postCounter}`,
+      category: payload.category as CategorySlug,
+      content,
+      createdAt: new Date().toISOString(),
+      language_code: payload.languageCode as SupportedLocale,
+      country_code: sanitizeCountryCode(payload.countryCode),
+      baseReports: 0,
+      baseReactions: {
+        agree: 0,
+        feel_this_too: 0,
+        brilliant_idea: 0,
+      },
+      allowEchoes: Boolean(payload.allowEchoes),
+      authorSessionId: sessionId,
+    };
+
+    store.postsById[newPost.id] = newPost;
+    store.postOrder.unshift(newPost.id);
+    store.echoesByPost[newPost.id] = [];
+    store.reportCountsByPost[newPost.id] = 0;
+    store.reportersByPost[newPost.id] = [];
+
+    return {
+      post: toPrototypePost(newPost),
+      reportCount: 0,
+      allowEchoes: newPost.allowEchoes,
+      authorTag: toPublicSignalId(sessionId),
+    };
   });
-
-  await sleep(SCAN_DELAY_MS);
-
-  store.postCounter += 1;
-  const newPost: StoredPost = {
-    id: `srv-${Date.now()}-${store.postCounter}`,
-    category: payload.category as CategorySlug,
-    content,
-    createdAt: new Date().toISOString(),
-    language_code: payload.languageCode as SupportedLocale,
-    country_code: sanitizeCountryCode(payload.countryCode),
-    baseReports: 0,
-    baseReactions: {
-      agree: 0,
-      feel_this_too: 0,
-      brilliant_idea: 0,
-    },
-    allowEchoes: Boolean(payload.allowEchoes),
-    authorSessionId: sessionId,
-  };
-
-  store.postsById.set(newPost.id, newPost);
-  store.postOrder.unshift(newPost.id);
-  store.echoesByPost.set(newPost.id, []);
-  store.reportCountsByPost.set(newPost.id, 0);
-  store.reportersByPost.set(newPost.id, new Set());
-
-  return {
-    post: toPrototypePost(newPost),
-    reportCount: 0,
-    allowEchoes: newPost.allowEchoes,
-    authorTag: toPublicSignalId(sessionId),
-  };
 }
 
 export async function sendEcho(
@@ -284,20 +354,6 @@ export async function sendEcho(
     intent: string;
   },
 ) {
-  const post = store.postsById.get(payload.postId);
-  if (!post) {
-    throw new ModerationError("This signal no longer exists.", 404);
-  }
-
-  const reportCount = store.reportCountsByPost.get(post.id) ?? post.baseReports;
-  if (reportCount >= REPORT_THRESHOLD) {
-    throw new ModerationError("This signal is no longer accepting replies.", 409);
-  }
-
-  if (!post.allowEchoes) {
-    throw new ModerationError("Echoes are disabled for this signal.", 403);
-  }
-
   const text = payload.text.trim();
   if (!text || text.length > 600) {
     throw new ModerationError("Echo text must be between 1 and 600 characters.");
@@ -307,63 +363,82 @@ export async function sendEcho(
     throw new ModerationError("Invalid Echo intent.");
   }
 
-  enforceRateLimit({
-    hitsBySession: store.echoHitsBySession,
-    sessionId,
-    windowMs: ECHO_RATE_WINDOW_MS,
-    maxHitsInWindow: MAX_ECHOES_PER_WINDOW,
-    minIntervalMs: MIN_ECHO_INTERVAL_MS,
-    actionName: "echo",
+  return runMutation((store) => {
+    const post = store.postsById[payload.postId];
+    if (!post) {
+      throw new ModerationError("This signal no longer exists.", 404);
+    }
+
+    const reportCount = store.reportCountsByPost[post.id] ?? post.baseReports;
+    if (reportCount >= REPORT_THRESHOLD) {
+      throw new ModerationError(
+        "This signal is no longer accepting replies.",
+        409,
+      );
+    }
+
+    if (!post.allowEchoes) {
+      throw new ModerationError("Echoes are disabled for this signal.", 403);
+    }
+
+    enforceRateLimit({
+      hitsBySession: store.echoHitsBySession,
+      sessionId,
+      windowMs: ECHO_RATE_WINDOW_MS,
+      maxHitsInWindow: MAX_ECHOES_PER_WINDOW,
+      minIntervalMs: MIN_ECHO_INTERVAL_MS,
+      actionName: "echo",
+    });
+
+    const isAuthorReply = post.authorSessionId === sessionId;
+    store.echoCounter += 1;
+
+    const echo: ServerEcho = {
+      id: `echo-srv-${Date.now()}-${store.echoCounter}`,
+      text,
+      intent: payload.intent as EchoIntent,
+      createdAt: new Date().toISOString(),
+      authorType: isAuthorReply ? "author" : "echo",
+      alias: isAuthorReply ? undefined : pickEchoAlias(`${post.id}:${sessionId}`),
+    };
+
+    const currentEchoes = store.echoesByPost[post.id] || [];
+    currentEchoes.push(echo);
+    store.echoesByPost[post.id] = currentEchoes;
+
+    return { echo };
   });
-
-  await sleep(SCAN_DELAY_MS);
-
-  const isAuthorReply = post.authorSessionId === sessionId;
-  store.echoCounter += 1;
-
-  const echo: ServerEcho = {
-    id: `echo-srv-${Date.now()}-${store.echoCounter}`,
-    text,
-    intent: payload.intent as EchoIntent,
-    createdAt: new Date().toISOString(),
-    authorType: isAuthorReply ? "author" : "echo",
-    alias: isAuthorReply ? undefined : pickEchoAlias(`${post.id}:${sessionId}`),
-  };
-
-  const currentEchoes = store.echoesByPost.get(post.id) || [];
-  currentEchoes.push(echo);
-  store.echoesByPost.set(post.id, currentEchoes);
-
-  return { echo };
 }
 
 export function reportSignal(sessionId: string, postId: string) {
-  const post = store.postsById.get(postId);
-  if (!post) {
-    throw new ModerationError("This signal no longer exists.", 404);
-  }
+  return runMutation((store) => {
+    const post = store.postsById[postId];
+    if (!post) {
+      throw new ModerationError("This signal no longer exists.", 404);
+    }
 
-  const reporters = store.reportersByPost.get(postId) || new Set<string>();
-  const currentCount = store.reportCountsByPost.get(postId) ?? post.baseReports;
+    const reporters = store.reportersByPost[postId] || [];
+    const currentCount = store.reportCountsByPost[postId] ?? post.baseReports;
 
-  if (reporters.has(sessionId)) {
+    if (reporters.includes(sessionId)) {
+      return {
+        alreadyReported: true,
+        reportCount: currentCount,
+        hidden: currentCount >= REPORT_THRESHOLD,
+      };
+    }
+
+    reporters.push(sessionId);
+    store.reportersByPost[postId] = reporters;
+    const nextCount = currentCount + 1;
+    store.reportCountsByPost[postId] = nextCount;
+
     return {
-      alreadyReported: true,
-      reportCount: currentCount,
-      hidden: currentCount >= REPORT_THRESHOLD,
+      alreadyReported: false,
+      reportCount: nextCount,
+      hidden: nextCount >= REPORT_THRESHOLD,
     };
-  }
-
-  reporters.add(sessionId);
-  store.reportersByPost.set(postId, reporters);
-  const nextCount = currentCount + 1;
-  store.reportCountsByPost.set(postId, nextCount);
-
-  return {
-    alreadyReported: false,
-    reportCount: nextCount,
-    hidden: nextCount >= REPORT_THRESHOLD,
-  };
+  });
 }
 
 function toPrototypePost(post: StoredPost): PrototypePost {

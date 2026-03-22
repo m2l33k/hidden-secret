@@ -70,6 +70,7 @@ const REACTIONS_KEY = "anonymous-space.reactions";
 const REPORTS_KEY = "anonymous-space.reports";
 const FEED_SCOPE_KEY = "anonymous-space.feed-scope";
 const QUIET_OATH_KEY = "hasAgreedToRules";
+const CLIENT_SCAN_DELAY_MS = 1500;
 
 const quietOathRules = [
   "Speak with empathy, not dominance.",
@@ -175,14 +176,6 @@ const mockResonanceNotifications: ResonanceNotification[] = [
   },
 ];
 
-function createSessionId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `anon-${Math.random().toString(36).slice(2)}-${Date.now()}`;
-}
-
 function safeJsonParse<T>(value: string | null, fallback: T): T {
   if (!value) {
     return fallback;
@@ -212,6 +205,10 @@ function generateAura(seed: string) {
   const to = auraToPalette[hashSeed(`${normalizedSeed}:t`) % auraToPalette.length];
 
   return `${direction} ${from} ${via} ${to}`;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export default function AnonymousSpace({
@@ -339,7 +336,7 @@ export default function AnonymousSpace({
   useEffect(() => {
     let isActive = true;
 
-    fetch("/api/moderation/session", { cache: "no-store" })
+    fetch("/api/moderation/init-session", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok || !isActive) {
           return;
@@ -351,9 +348,7 @@ export default function AnonymousSpace({
         }
       })
       .catch(() => {
-        if (isActive) {
-          setSessionId(createSessionId());
-        }
+        // keep anonymous placeholder if init session cannot be established
       });
 
     const storedScope = localStorage.getItem(FEED_SCOPE_KEY);
@@ -628,14 +623,40 @@ export default function AnonymousSpace({
 
   const callModerationApi = async <T,>(
     body: Record<string, unknown>,
+    hasRetried = false,
   ): Promise<T> => {
-    const response = await fetch("/api/moderation", {
+    let response = await fetch("/api/moderation", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
     });
+
+    if (response.status === 401 && !hasRetried) {
+      const initResponse = await fetch("/api/moderation/init-session", {
+        cache: "no-store",
+      });
+
+      if (!initResponse.ok) {
+        throw new Error("Unauthorized. Session initialization failed.");
+      }
+
+      const initPayload = (await initResponse.json()) as {
+        publicSessionId?: string;
+      };
+      if (initPayload.publicSessionId) {
+        setSessionId(initPayload.publicSessionId);
+      }
+
+      response = await fetch("/api/moderation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    }
 
     const payload = (await response.json()) as T & { error?: string };
     if (!response.ok) {
@@ -655,6 +676,7 @@ export default function AnonymousSpace({
 
     setIsPublishing(true);
     try {
+      await wait(CLIENT_SCAN_DELAY_MS);
       const result = await callModerationApi<{
         post: PrototypePost;
         reportCount: number;
@@ -817,6 +839,7 @@ export default function AnonymousSpace({
 
     setIsScanningEchoByPost((previous) => ({ ...previous, [postId]: true }));
     try {
+      await wait(CLIENT_SCAN_DELAY_MS);
       const result = await callModerationApi<{ echo: EchoEntry }>({
         action: "echo",
         payload: {
