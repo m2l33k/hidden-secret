@@ -19,5 +19,7 @@ export default async function CategoryPage({ params }: PageParams) {
     notFound();
   }
 
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
   return <AnonymousSpace initialCategory={category as CategorySlug} />;
 }

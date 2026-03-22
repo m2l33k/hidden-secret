@@ -6,14 +6,16 @@ import {
   Check,
   Flag,
   HelpCircle,
+  Inbox,
   Lightbulb,
+  Lock,
   MessageCircleHeart,
   Search,
   SendHorizontal,
   Sparkles,
   Zap,
 } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FocusEvent, FormEvent, useEffect, useRef, useState } from "react";
 import {
   CATEGORIES,
   CategorySlug,
@@ -25,6 +27,11 @@ import {
 
 type Props = {
   initialCategory: CategorySlug;
+};
+
+type Toast = {
+  id: number;
+  message: string;
 };
 
 const SESSION_KEY = "anonymous-space.session-id";
@@ -44,11 +51,19 @@ const reactionIcon: Record<ReactionType, typeof Check> = {
 };
 
 const categoryClass: Record<CategorySlug, string> = {
-  ideas: "bg-[var(--color-chip-blue)] text-[var(--color-chip-blue-text)]",
-  confusions:
-    "bg-[var(--color-chip-amber)] text-[var(--color-chip-amber-text)]",
+  ideas: "bg-[var(--color-chip-amber)] text-[var(--color-chip-amber-text)]",
+  confusions: "bg-[var(--color-chip-blue)] text-[var(--color-chip-blue-text)]",
   "unpopular-opinions":
     "bg-[var(--color-chip-magenta)] text-[var(--color-chip-magenta-text)]",
+};
+
+const cardHoverClass: Record<CategorySlug, string> = {
+  ideas:
+    "hover:border-[color:color-mix(in_srgb,var(--color-chip-amber-text)_32%,var(--color-line-soft))]",
+  confusions:
+    "hover:border-[color:color-mix(in_srgb,var(--color-chip-blue-text)_30%,var(--color-line-soft))]",
+  "unpopular-opinions":
+    "hover:border-[color:color-mix(in_srgb,var(--color-chip-magenta-text)_34%,var(--color-line-soft))]",
 };
 
 function createSessionId() {
@@ -77,10 +92,17 @@ export default function AnonymousSpace({ initialCategory }: Props) {
   const [composerCategory, setComposerCategory] =
     useState<CategorySlug>(initialCategory);
   const [sessionId, setSessionId] = useState("");
+  const [isComposing, setIsComposing] = useState(false);
   const [reactionsByPost, setReactionsByPost] = useState<
     Record<string, ReactionType>
   >({});
   const [reportsByPost, setReportsByPost] = useState<Record<string, true>>({});
+  const [expandedPosts, setExpandedPosts] = useState<Record<string, true>>({});
+  const [reactionPopKey, setReactionPopKey] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const toastCounterRef = useRef(0);
+  const postCounterRef = useRef(0);
 
   useEffect(() => {
     setComposerCategory(initialCategory);
@@ -113,6 +135,32 @@ export default function AnonymousSpace({ initialCategory }: Props) {
   useEffect(() => {
     localStorage.setItem(REPORTS_KEY, JSON.stringify(reportsByPost));
   }, [reportsByPost]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) {
+      return;
+    }
+
+    el.style.height = "0px";
+    const nextHeight = Math.min(Math.max(el.scrollHeight, 112), 380);
+    el.style.height = `${nextHeight}px`;
+  }, [draft]);
+
+  const triggerHaptic = (duration = 14) => {
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(duration);
+    }
+  };
+
+  const pushToast = (message: string) => {
+    toastCounterRef.current += 1;
+    const id = toastCounterRef.current;
+    setToasts((prev) => [...prev, { id, message }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 2400);
+  };
 
   const getReportCount = (post: PrototypePost) =>
     post.baseReports + (reportsByPost[post.id] ? 1 : 0);
@@ -153,8 +201,9 @@ export default function AnonymousSpace({ initialCategory }: Props) {
       return;
     }
 
+    postCounterRef.current += 1;
     const newPost: PrototypePost = {
-      id: `local-${Date.now()}`,
+      id: `local-${postCounterRef.current}`,
       category: composerCategory,
       content: trimmedDraft,
       createdAt: new Date().toISOString(),
@@ -168,6 +217,9 @@ export default function AnonymousSpace({ initialCategory }: Props) {
 
     setPosts((previous) => [newPost, ...previous]);
     setDraft("");
+    setIsComposing(false);
+    triggerHaptic(18);
+    pushToast("Published anonymously. Post sent into the void.");
   };
 
   const reactToPost = (postId: string, reaction: ReactionType) => {
@@ -176,6 +228,10 @@ export default function AnonymousSpace({ initialCategory }: Props) {
     }
 
     setReactionsByPost((previous) => ({ ...previous, [postId]: reaction }));
+    setReactionPopKey(`${postId}-${reaction}`);
+    window.setTimeout(() => setReactionPopKey(null), 250);
+    triggerHaptic(12);
+    pushToast("Vote recorded.");
   };
 
   const reportPost = (postId: string) => {
@@ -184,11 +240,36 @@ export default function AnonymousSpace({ initialCategory }: Props) {
     }
 
     setReportsByPost((previous) => ({ ...previous, [postId]: true }));
+    triggerHaptic(8);
+    pushToast("Report submitted.");
+  };
+
+  const handleComposerBlurCapture = (event: FocusEvent<HTMLFormElement>) => {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (!nextTarget || !event.currentTarget.contains(nextTarget)) {
+      setIsComposing(false);
+    }
+  };
+
+  const toggleReadMore = (postId: string) => {
+    setExpandedPosts((previous) => {
+      if (previous[postId]) {
+        const copy = { ...previous };
+        delete copy[postId];
+        return copy;
+      }
+
+      return { ...previous, [postId]: true };
+    });
   };
 
   return (
     <div className="min-h-screen bg-[var(--color-bg-0)] text-[var(--color-text-primary)]">
-      <header className="sticky top-0 z-40 border-b border-[var(--color-line-soft)] bg-[var(--color-bg-top)]/95 backdrop-blur-sm">
+      {isComposing && (
+        <div className="pointer-events-none fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px] transition-opacity" />
+      )}
+
+      <header className="sticky top-0 z-50 border-b border-[var(--color-line-soft)] bg-[var(--color-bg-top)]/95 backdrop-blur-sm">
         <div className="mx-auto flex h-12 w-full max-w-[1400px] items-center gap-2 px-2.5 md:h-14 md:gap-3 md:px-4">
           <Link
             href="/ideas"
@@ -217,7 +298,7 @@ export default function AnonymousSpace({ initialCategory }: Props) {
         </div>
       </header>
 
-      <div className="sticky top-12 z-30 border-b border-[var(--color-line-soft)] bg-[var(--color-bg-top)]/96 px-2 py-1.5 backdrop-blur-sm lg:hidden">
+      <div className="sticky top-12 z-40 border-b border-[var(--color-line-soft)] bg-[var(--color-bg-top)]/96 px-2 py-1.5 backdrop-blur-sm lg:hidden">
         <nav
           className="hide-scrollbar flex gap-1.5 overflow-x-auto"
           aria-label="Mobile categories"
@@ -247,7 +328,7 @@ export default function AnonymousSpace({ initialCategory }: Props) {
         </nav>
       </div>
 
-      <main className="mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-3 px-2 py-3 md:gap-4 md:px-4 lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)_320px]">
+      <main className="relative z-10 mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-3 px-2 py-3 md:gap-4 md:px-4 lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)_320px]">
         <aside className="hidden lg:block">
           <div className="sticky top-[74px] space-y-3">
             <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5">
@@ -279,22 +360,19 @@ export default function AnonymousSpace({ initialCategory }: Props) {
                 })}
               </nav>
             </section>
-
-            <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 text-[12px] text-[var(--color-text-soft)]">
-              <p className="mb-1 font-semibold text-[var(--color-text-primary)]">
-                Session ID
-              </p>
-              <p className="break-all text-[11px] text-[var(--color-text-muted)]">
-                {sessionId || "loading..."}
-              </p>
-            </section>
           </div>
         </aside>
 
         <section className="space-y-2.5">
           <form
             onSubmit={handlePublish}
-            className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 md:p-3"
+            onFocusCapture={() => setIsComposing(true)}
+            onBlurCapture={handleComposerBlurCapture}
+            className={`relative z-50 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 transition-all md:p-3 ${
+              isComposing
+                ? "shadow-[0_0_0_1px_rgba(255,69,0,0.35),0_24px_64px_rgba(0,0,0,0.55)]"
+                : ""
+            }`}
           >
             <div className="hide-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
               {CATEGORIES.map((category) => {
@@ -323,26 +401,33 @@ export default function AnonymousSpace({ initialCategory }: Props) {
               Anonymous post text
             </label>
             <textarea
+              ref={textareaRef}
               id="post-text"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               maxLength={1200}
               placeholder="Share something honest..."
-              className="mt-2 min-h-24 w-full resize-y rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 py-2.5 text-[14px] leading-relaxed text-[var(--color-text-primary)] outline-none transition placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-line-strong)]"
+              className="mt-2 min-h-24 w-full max-h-[380px] resize-none overflow-y-auto rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 py-2.5 text-[14px] leading-relaxed text-[var(--color-text-primary)] outline-none transition placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-line-strong)]"
             />
 
-            <div className="mt-2.5 flex items-center justify-between gap-2">
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
               <p className="text-[11px] text-[var(--color-text-muted)]">
                 {draft.trim().length}/1200
               </p>
-              <button
-                type="submit"
-                disabled={!draft.trim()}
-                className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--color-brand)] px-3.5 text-[12px] font-semibold text-[var(--color-brand-text)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <SendHorizontal className="h-3.5 w-3.5" />
-                Publish anonymously
-              </button>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+                  <Lock className="h-3.5 w-3.5" />
+                  100% Anonymous. No tracking.
+                </span>
+                <button
+                  type="submit"
+                  disabled={!draft.trim()}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--color-brand)] px-3.5 text-[12px] font-semibold text-[var(--color-brand-text)] transition hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <SendHorizontal className="h-3.5 w-3.5" />
+                  Publish
+                </button>
+              </div>
             </div>
           </form>
 
@@ -353,88 +438,122 @@ export default function AnonymousSpace({ initialCategory }: Props) {
             </div>
           )}
 
-          <div className="space-y-2">
-            {visiblePosts.map((post, index) => {
-              const alreadyReacted = reactionsByPost[post.id];
-              const reportCount = getReportCount(post);
-              const hasReported = Boolean(reportsByPost[post.id]);
-              const CategoryIcon = categoryIcon[post.category];
+          {visiblePosts.length === 0 ? (
+            <div className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] px-4 py-8 text-center">
+              <Inbox className="mx-auto h-8 w-8 text-[var(--color-text-muted)]" />
+              <p className="mt-3 text-[14px] font-medium text-[var(--color-text-primary)]">
+                It&apos;s quiet in here.
+              </p>
+              <p className="mt-1 text-[12px] text-[var(--color-text-muted)]">
+                Be the first to break the silence.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {visiblePosts.map((post, index) => {
+                const alreadyReacted = reactionsByPost[post.id];
+                const reportCount = getReportCount(post);
+                const hasReported = Boolean(reportsByPost[post.id]);
+                const CategoryIcon = categoryIcon[post.category];
+                const isExpanded = Boolean(expandedPosts[post.id]);
+                const isLongPost = post.content.length > 300;
 
-              return (
-                <article
-                  key={post.id}
-                  className="feed-enter rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 md:p-3"
-                  style={{ animationDelay: `${index * 30}ms` }}
-                >
-                  <header className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${categoryClass[post.category]}`}
+                return (
+                  <article
+                    key={post.id}
+                    className={`feed-enter rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-2.5 transition-colors md:p-3 ${cardHoverClass[post.category]}`}
+                    style={{ animationDelay: `${index * 30}ms` }}
+                  >
+                    <header className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${categoryClass[post.category]}`}
+                      >
+                        <CategoryIcon className="h-3.5 w-3.5" />
+                        {
+                          CATEGORIES.find((category) => category.slug === post.category)
+                            ?.label
+                        }
+                      </span>
+                      <span>•</span>
+                      <time dateTime={post.createdAt}>
+                        {formatDistanceToNow(new Date(post.createdAt), {
+                          addSuffix: true,
+                        })}
+                      </time>
+                    </header>
+
+                    <div
+                      className={`relative overflow-hidden transition-[max-height] duration-300 ${
+                        isLongPost && !isExpanded ? "max-h-36" : "max-h-[1200px]"
+                      }`}
                     >
-                      <CategoryIcon className="h-3.5 w-3.5" />
-                      {
-                        CATEGORIES.find((category) => category.slug === post.category)
-                          ?.label
-                      }
-                    </span>
-                    <span>•</span>
-                    <time dateTime={post.createdAt}>
-                      {formatDistanceToNow(new Date(post.createdAt), {
-                        addSuffix: true,
+                      <p className="whitespace-pre-wrap text-[16px] leading-[1.5] text-[var(--color-text-primary)] md:text-[17px]">
+                        {post.content}
+                      </p>
+                      {isLongPost && !isExpanded && (
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[var(--color-bg-surface)] to-transparent" />
+                      )}
+                    </div>
+
+                    {isLongPost && (
+                      <button
+                        type="button"
+                        onClick={() => toggleReadMore(post.id)}
+                        className="mt-1 text-[12px] text-[var(--color-text-muted)] transition hover:text-[var(--color-text-primary)]"
+                      >
+                        {isExpanded ? "Show less" : "Read more..."}
+                      </button>
+                    )}
+
+                    <div className="mt-2.5 grid gap-1.5 sm:flex sm:flex-wrap sm:items-center">
+                      {REACTION_TYPES.map((reaction) => {
+                        const Icon = reactionIcon[reaction.key];
+                        const chosen = alreadyReacted === reaction.key;
+                        const popKey = `${post.id}-${reaction.key}`;
+
+                        return (
+                          <button
+                            key={reaction.key}
+                            type="button"
+                            onClick={() => reactToPost(post.id, reaction.key)}
+                            disabled={Boolean(alreadyReacted)}
+                            className={`inline-flex h-10 w-full items-center justify-between gap-2 rounded-full border px-3 text-[12px] transition sm:w-auto sm:justify-start active:scale-95 ${
+                              chosen
+                                ? "border-[var(--color-brand)] bg-[var(--color-brand-soft)] text-[var(--color-brand)] shadow-[0_0_0_1px_rgba(255,69,0,0.3),0_0_20px_rgba(255,69,0,0.22)]"
+                                : "border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] text-[var(--color-text-soft)] hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed"
+                            } ${reactionPopKey === popKey ? "reaction-pop" : ""}`}
+                          >
+                            <span className="inline-flex items-center gap-1.5">
+                              <Icon className="h-3.5 w-3.5" />
+                              {reaction.label}
+                            </span>
+                            <span className="rounded-full bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-[10px]">
+                              {getReactionCount(post, reaction.key)}
+                            </span>
+                          </button>
+                        );
                       })}
-                    </time>
-                  </header>
+                    </div>
 
-                  <p className="whitespace-pre-wrap text-[16px] leading-[1.5] text-[var(--color-text-primary)] md:text-[17px]">
-                    {post.content}
-                  </p>
-
-                  <div className="mt-2.5 grid gap-1.5 sm:flex sm:flex-wrap sm:items-center">
-                    {REACTION_TYPES.map((reaction) => {
-                      const Icon = reactionIcon[reaction.key];
-                      const chosen = alreadyReacted === reaction.key;
-
-                      return (
-                        <button
-                          key={reaction.key}
-                          type="button"
-                          onClick={() => reactToPost(post.id, reaction.key)}
-                          disabled={Boolean(alreadyReacted)}
-                          className={`inline-flex h-10 w-full items-center justify-between gap-2 rounded-full border px-3 text-[12px] transition sm:w-auto sm:justify-start ${
-                            chosen
-                              ? "border-[var(--color-brand)] bg-[var(--color-brand-soft)] text-[var(--color-brand)]"
-                              : "border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] text-[var(--color-text-soft)] hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed"
-                          }`}
-                        >
-                          <span className="inline-flex items-center gap-1.5">
-                            <Icon className="h-3.5 w-3.5" />
-                            {reaction.label}
-                          </span>
-                          <span className="rounded-full bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-[10px]">
-                            {getReactionCount(post, reaction.key)}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => reportPost(post.id)}
-                      disabled={hasReported || reportCount >= 3}
-                      className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 text-[12px] text-[var(--color-text-muted)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-soft)] disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <Flag className="h-3.5 w-3.5" />
-                      {hasReported ? "Reported" : "Report"}
-                    </button>
-                    <p className="text-[11px] text-[var(--color-text-muted)]">
-                      {reportCount}/3 reports
-                    </p>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => reportPost(post.id)}
+                        disabled={hasReported || reportCount >= 3}
+                        className="inline-flex h-10 items-center gap-1.5 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-bg-elevated)] px-3 text-[12px] text-[var(--color-text-muted)] transition hover:border-[var(--color-line-strong)] hover:text-[var(--color-text-soft)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Flag className="h-3.5 w-3.5" />
+                        {hasReported ? "Reported" : "Report"}
+                      </button>
+                      <p className="text-[11px] text-[var(--color-text-muted)]">
+                        {reportCount}/3 reports
+                      </p>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         <aside className="hidden xl:block">
@@ -451,17 +570,26 @@ export default function AnonymousSpace({ initialCategory }: Props) {
 
             <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg-surface)] p-3 text-[12px] text-[var(--color-text-soft)]">
               <p className="font-semibold text-[var(--color-text-primary)]">
-                Prototype status
+                Session
               </p>
-              <p className="mt-1.5">
-                Design polish pass: denser feed rhythm, cleaner type scale, and
-                mobile-first tap ergonomics.
+              <p className="mt-1.5 break-all text-[11px] text-[var(--color-text-muted)]">
+                {sessionId || "loading..."}
               </p>
             </section>
           </div>
         </aside>
       </main>
+
+      <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[60] mx-auto flex w-full max-w-md flex-col items-center gap-2 px-3">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className="toast-enter w-full rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-bg-surface)]/95 px-3 py-2 text-center text-[12px] text-[var(--color-text-primary)] shadow-[0_18px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm"
+          >
+            {toast.message}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
-
