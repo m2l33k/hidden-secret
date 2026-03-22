@@ -1,0 +1,242 @@
+{
+  "version": 1,
+  "postsById": {
+    "post-1": {
+      "id": "post-1",
+      "category": "ideas",
+      "content": "What if schools taught emotional regulation with the same seriousness as math?",
+      "createdAt": "2026-03-22T08:12:00.000Z",
+      "language_code": "en",
+      "country_code": "US",
+      "baseReports": 0,
+      "baseReactions": {
+        "agree": 24,
+        "feel_this_too": 11,
+        "brilliant_idea": 9
+      },
+      "allowEchoes": false,
+      "authorSessionId": "seed-author-1"
+    },
+    "post-2": {
+      "id": "post-2",
+      "category": "ideas",
+      "content": "Public libraries could host anonymous monthly life reset circles where nobody gives advice, they only listen.",
+      "createdAt": "2026-03-22T06:45:00.000Z",
+      "language_code": "en",
+      "country_code": "CA",
+      "baseReports": 1,
+      "baseReactions": {
+        "agree": 15,
+        "feel_this_too": 20,
+        "brilliant_idea": 14
+      },
+      "allowEchoes": true,
+      "authorSessionId": "seed-author-2"
+    },
+    "post-3": {
+      "id": "post-3",
+      "category": "confusions",
+      "content": "I still do not understand why being exhausted all the time is considered normal adulthood.",
+      "createdAt": "2026-03-22T05:10:00.000Z",
+      "language_code": "en",
+      "country_code": "GB",
+      "baseReports": 0,
+      "baseReactions": {
+        "agree": 8,
+        "feel_this_too": 38,
+        "brilliant_idea": 2
+      },
+      "allowEchoes": true,
+      "authorSessionId": "seed-author-3"
+    },
+    "post-4": {
+      "id": "post-4",
+      "category": "confusions",
+      "content": "Pourquoi celebrer la productivite mais rarement le repos ?",
+      "createdAt": "2026-03-21T20:34:00.000Z",
+      "language_code": "fr",
+      "country_code": "FR",
+      "baseReports": 0,
+      "baseReactions": {
+        "agree": 13,
+        "feel_this_too": 27,
+        "brilliant_idea": 6
+      },
+      "allowEchoes": true,
+      "authorSessionId": "seed-author-4"
+    },
+    "post-5": {
+      "id": "post-5",
+      "category": "unpopular-opinions",
+      "content": "Most meetings are emotional comfort rituals and should have been a shared document instead.",
+      "createdAt": "2026-03-21T16:22:00.000Z",
+      "language_code": "en",
+      "country_code": "US",
+      "baseReports": 1,
+      "baseReactions": {
+        "agree": 29,
+        "feel_this_too": 18,
+        "brilliant_idea": 12
+      },
+      "allowEchoes": false,
+      "authorSessionId": "seed-author-5"
+    },
+    "post-6": {
+      "id": "post-6",
+      "category": "unpopular-opinions",
+      "content": "thaqafat tahsin al dhat al daem asbahat shaklan min jald al dhat.",
+      "createdAt": "2026-03-21T11:08:00.000Z",
+      "language_code": "ar",
+      "country_code": "TN",
+      "baseReports": 2,
+      "baseReactions": {
+        "agree": 17,
+        "feel_this_too": 16,
+        "brilliant_idea": 10
+      },
+      "allowEchoes": true,
+      "authorSessionId": "seed-author-6"
+    },
+    "post-7": {
+      "id": "post-7",
+      "category": "ideas",
+      "content": "Et si les villes reservaient une heure sans notifications chaque soir ?",
+      "createdAt": "2026-03-21T09:08:00.000Z",
+      "language_code": "fr",
+      "country_code": "BE",
+      "baseReports": 2,
+      "baseReactions": {
+        "agree": 9,
+        "feel_this_too": 13,
+        "brilliant_idea": 5
+      },
+      "allowEchoes": true,
+      "authorSessionId": "seed-author-7"
+    },
+    "srv-1774191609536-1": {
+      "id": "srv-1774191609536-1",
+      "category": "ideas",
+      "content": "rate limit probe",
+      "createdAt": "2026-03-22T15:00:09.536Z",
+      "language_code": "en",
+      "country_code": "US",
+      "baseReports": 0,
+      "baseReactions": {
+        "agree": 0,
+        "feel_this_too": 0,
+        "brilliant_idea": 0
+      },
+      "allowEchoes": true,
+      "authorSessionId": "00000000-0000-4000-8000-000000000021"
+    },
+    "srv-1774191609697-2": {
+      "id": "srv-1774191609697-2",
+      "category": "ideas",
+      "content": "rate limit probe",
+      "createdAt": "2026-03-22T15:00:09.697Z",
+      "language_code": "en",
+      "country_code": "US",
+      "baseReports": 0,
+      "baseReactions": {
+        "agree": 0,
+        "feel_this_too": 0,
+        "brilliant_idea": 0
+      },
+      "allowEchoes": true,
+      "authorSessionId": "00000000-0000-4000-8000-000000000022"
+    }
+  },
+  "postOrder": [
+    "srv-1774191609697-2",
+    "srv-1774191609536-1",
+    "post-1",
+    "post-2",
+    "post-3",
+    "post-4",
+    "post-5",
+    "post-6",
+    "post-7"
+  ],
+  "echoesByPost": {
+    "post-1": [
+      {
+        "id": "echo-seed-1",
+        "text": "I have seen this work in small workshops. It changes the tone instantly.",
+        "intent": "experience",
+        "createdAt": "2026-03-22T07:35:00.000Z",
+        "authorType": "echo",
+        "alias": "Echo Atlas"
+      }
+    ],
+    "post-2": [
+      {
+        "id": "echo-seed-2",
+        "text": "Could this be hosted weekly in schools too?",
+        "intent": "question",
+        "createdAt": "2026-03-22T06:20:00.000Z",
+        "authorType": "echo",
+        "alias": "Echo Nova"
+      },
+      {
+        "id": "echo-seed-3",
+        "text": "Yes, but only if facilitators are trained to hold silence safely.",
+        "intent": "perspective",
+        "createdAt": "2026-03-22T06:10:00.000Z",
+        "authorType": "author"
+      }
+    ],
+    "post-5": [
+      {
+        "id": "echo-seed-4",
+        "text": "Hard truth. Shared docs plus async votes would solve half of this.",
+        "intent": "perspective",
+        "createdAt": "2026-03-21T15:55:00.000Z",
+        "authorType": "echo",
+        "alias": "Echo Lumen"
+      }
+    ],
+    "srv-1774191609536-1": [],
+    "srv-1774191609697-2": []
+  },
+  "reportCountsByPost": {
+    "post-1": 1,
+    "post-2": 1,
+    "post-3": 3,
+    "post-4": 1,
+    "post-5": 1,
+    "post-6": 2,
+    "post-7": 2,
+    "srv-1774191609536-1": 0,
+    "srv-1774191609697-2": 0
+  },
+  "reportersByPost": {
+    "post-1": [
+      "00000000-0000-4000-8000-000000000001"
+    ],
+    "post-2": [],
+    "post-3": [
+      "00000000-0000-4000-8000-000000000011",
+      "00000000-0000-4000-8000-000000000012",
+      "00000000-0000-4000-8000-000000000013"
+    ],
+    "post-4": [
+      "00000000-0000-4000-8000-000000000031"
+    ],
+    "post-5": [],
+    "post-6": [],
+    "post-7": [],
+    "srv-1774191609536-1": [],
+    "srv-1774191609697-2": []
+  },
+  "publishHitsBySession": {
+    "00000000-0000-4000-8000-000000000021": [
+      1774191609536
+    ],
+    "00000000-0000-4000-8000-000000000022": [
+      1774191609697
+    ]
+  },
+  "echoHitsBySession": {},
+  "postCounter": 2,
+  "echoCounter": 0
+}
