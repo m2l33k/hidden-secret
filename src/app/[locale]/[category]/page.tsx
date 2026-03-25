@@ -29,8 +29,6 @@ export default async function CategoryPage({ params }: PageParams) {
   const headerStore = await headers();
   const countryCode = (headerStore.get("x-user-country") || "US").toUpperCase();
 
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
   return (
     <AnonymousSpace
       initialCategory={category as CategorySlug}
