@@ -19,7 +19,7 @@ export function createServerSessionId() {
   return randomUUID();
 }
 
-export function isValidServerSessionId(value: string | undefined) {
+export function isValidServerSessionId(value: string | undefined): value is string {
   if (!value) {
     return false;
   }
