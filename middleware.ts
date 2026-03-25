@@ -15,6 +15,27 @@ const securedCookieOptions = {
   httpOnly: true,
 };
 
+const isDevelopment = process.env.NODE_ENV === "development";
+
+function buildCspHeader(nonce: string) {
+  const directives = [
+    "default-src 'self'",
+    isDevelopment
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'unsafe-eval'`
+      : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `style-src 'self' 'unsafe-inline'`,
+    "img-src 'self' data: blob:",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "upgrade-insecure-requests",
+  ];
+  return directives.join("; ");
+}
+
 function extractLocaleFromPath(pathname: string): SupportedLocale | null {
   const maybeLocale = pathname.split("/")[1];
   if (isSupportedLocale(maybeLocale)) {
@@ -78,6 +99,8 @@ function hasValidSessionCookie(request: NextRequest) {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const cspHeader = buildCspHeader(nonce);
   const countryCode = resolveCountryCode(request);
   const localeFromPath = extractLocaleFromPath(pathname);
 
@@ -86,6 +109,7 @@ export function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = `/${locale}${pathname === "/" ? "" : pathname}`;
     const response = NextResponse.redirect(redirectUrl);
+    response.headers.set("Content-Security-Policy", cspHeader);
     response.cookies.set("locale", locale, securedCookieOptions);
     response.cookies.set("country_code", countryCode, securedCookieOptions);
     if (!hasValidSessionCookie(request)) {
@@ -99,13 +123,16 @@ export function middleware(request: NextRequest) {
   }
 
   const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("x-user-country", countryCode);
   requestHeaders.set("x-user-locale", localeFromPath);
+  requestHeaders.set("Content-Security-Policy", cspHeader);
 
   const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
 
+  response.headers.set("Content-Security-Policy", cspHeader);
   response.cookies.set("locale", localeFromPath, securedCookieOptions);
   response.cookies.set("country_code", countryCode, securedCookieOptions);
   if (!hasValidSessionCookie(request)) {
